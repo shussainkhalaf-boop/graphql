@@ -1,6 +1,6 @@
 // app.js — single-file build (SVG helpers inline) + accurate numbers
 
-// ================= SVG HELPERS =================
+// ==== SVG HELPERS (inline) ====
 function drawLineChart(selector, series, opts){
   const svg = document.querySelector(selector); if(!svg) return; svg.innerHTML = "";
   const W=680,H=280,P={l:46,r:10,t:18,b:34}; svg.setAttribute("viewBox","0 0 "+W+" "+H);
@@ -65,7 +65,7 @@ function drawBarChart(selector, data){
   function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
 }
 
-// ================= APP LOGIC =================
+// ==== APP LOGIC ====
 const { SIGNIN_URL, GRAPHQL_URL } = window.__CONFIG__;
 
 const el = (id) => document.getElementById(id);
@@ -82,7 +82,7 @@ function setScreen(authed) {
 function b64urlDecode(input){ input=input.replace(/-/g,"+").replace(/_/g,"/"); const pad=input.length%4; if(pad) input+="=".repeat(4-pad); return atob(input); }
 function parseJwt(token){ try{ return JSON.parse(b64urlDecode(token.split(".")[1])); }catch{ return null; } }
 
-// ---- Signin (robust parsing) ----
+// ---- Signin (robust) ----
 async function signin(identity, password) {
   const basic = btoa(identity + ":" + password);
   const res = await fetch(SIGNIN_URL, { method: "POST", headers: { Authorization: "Basic " + basic } });
@@ -101,7 +101,7 @@ async function signin(identity, password) {
   return jwt;
 }
 
-// ---- GraphQL helper ----
+// ---- GraphQL ----
 async function gql(query, variables = {}) {
   const token = localStorage.getItem(TOKEN_KEY);
   const res = await fetch(GRAPHQL_URL, {
@@ -117,12 +117,14 @@ async function gql(query, variables = {}) {
 // ---- Queries ----
 const Q_USER = `{ user { id login firstName lastName } }`;
 
-// Accurate XP (total + timeline)
+// Accurate XP total + timeline
 const Q_XP_SUM = `
 query XPsum($uid:Int!){
   transaction_aggregate(
     where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
-  ){ aggregate{ sum{ amount } } }
+  ){
+    aggregate{ sum{ amount } }
+  }
 }`;
 const Q_XP_LIST = `
 query XP($uid:Int!, $limit:Int!){
@@ -130,7 +132,9 @@ query XP($uid:Int!, $limit:Int!){
     where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
     order_by:{ createdAt: asc }
     limit: $limit
-  ){ amount createdAt }
+  ){
+    amount createdAt
+  }
 }`;
 
 // Latest result per object (dedupe retries)
@@ -138,9 +142,11 @@ const Q_RESULTS_LATEST = `
 query LatestResults($uid:Int!){
   result(
     where:{ userId:{_eq:$uid} }
-    order_by:[{objectId: asc},{createdAt: desc}]
+    order_by: [{objectId: asc}, {createdAt: desc}]
     distinct_on: objectId
-  ){ objectId grade createdAt }
+  ){
+    objectId grade createdAt type
+  }
 }`;
 
 // Latest progress per object (for cards)
@@ -148,9 +154,11 @@ const Q_PROGRESS_LATEST = `
 query LatestProgress($uid:Int!){
   progress(
     where:{ userId:{_eq:$uid} }
-    order_by:[{objectId: asc},{createdAt: desc}]
+    order_by:[{objectId: asc}, {createdAt: desc}]
     distinct_on: objectId
-  ){ objectId grade createdAt path userId }
+  ){
+    objectId grade createdAt path userId
+  }
 }`;
 
 const Q_OBJECTS = `
@@ -158,7 +166,7 @@ query O($ids:[Int!]){
   object(where:{ id:{ _in:$ids } }){ id type name }
 }`;
 
-// ---- Rendering helpers ----
+// ---- Helpers ----
 function fmtDate(s){ return new Date(s).toLocaleString(); }
 
 // ---- Main loader ----
@@ -174,21 +182,24 @@ async function loadAll(){
   const hero = document.getElementById("hero-name");
   if (hero) hero.textContent = (user.login || "User") + " • Profile";
 
-  // XP total
+  // XP accurate total
   const xpSumData = await gql(Q_XP_SUM, { uid: user.id });
   const xpTotal = (xpSumData.transaction_aggregate.aggregate.sum.amount) || 0;
-  document.getElementById("xp-total").textContent = xpTotal.toLocaleString();
+  const xpTotalEl = document.getElementById("xp-total");
+  if (xpTotalEl) xpTotalEl.textContent = xpTotal.toLocaleString();
 
-  // XP timeline (daily buckets)
+  // XP timeline (large limit)
   const xpList = await gql(Q_XP_LIST, { uid: user.id, limit: 5000 });
-  const byDay = {};
-  (xpList.transaction || []).forEach(x=>{
-    const d = new Date(x.createdAt).toISOString().slice(0,10); // UTC
-    byDay[d] = (byDay[d] || 0) + (x.amount || 0);
-  });
-  const series = Object.entries(byDay)
-    .map(([x,y])=>({x,y}))
-    .sort((a,b)=> a.x.localeCompare(b.x));
+  const series = (() => {
+    const byDay = {};
+    (xpList.transaction || []).forEach(x=>{
+      const d = new Date(x.createdAt).toISOString().slice(0,10); // UTC day bucket
+      byDay[d] = (byDay[d] || 0) + (x.amount || 0);
+    });
+    return Object.entries(byDay)
+      .sort((a,b)=> a[0].localeCompare(b[0]))
+      .map(([x,y])=>({ x, y }));
+  })();
   drawLineChart("#svg-xp", series, { yLabel: "XP" });
 
   // Pass/Fail using latest result per object
@@ -196,16 +207,18 @@ async function loadAll(){
   const rows = latest.result || [];
   const passed = rows.filter(r=>r.grade === 1).length;
   const failed = rows.filter(r=>r.grade === 0).length;
+
   document.getElementById("passed-count").textContent = passed;
   document.getElementById("failed-count").textContent = failed;
   document.getElementById("audit-ratio").textContent =
     (passed+failed) ? (passed/(passed+failed)).toFixed(2) : "-";
+
   drawDonut("#svg-ratio", [
     { label: "PASS", value: passed, cls: "slice-pass" },
     { label: "FAIL", value: failed, cls: "slice-fail" }
   ]);
 
-  // Projects (latest per object) + bar by type
+  // Projects (latest per object) + types bar
   const pr = await gql(Q_PROGRESS_LATEST, { uid: user.id });
   const items = pr.progress || [];
   const projBox = document.getElementById("projects"); if (projBox) projBox.innerHTML = "";
