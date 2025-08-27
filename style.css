@@ -1,11 +1,15 @@
-/* Neon theme + inline SVG logo; removed any captions/filenames */
+/* Neon theme + inline SVG logo; wide layout; no footer text */
 *{box-sizing:border-box}
 :root{
   --bg0:#05060b; --bg1:#0b0f1a; --card:rgba(17,23,41,.55);
   --border:rgba(140,160,255,.25); --text:#e6e8ff; --muted:#a9b0d6;
   --neon1:#7c3aed; --neon2:#06b6d4; --fail:#ef4444; --pass:#22c55e;
 }
-html,body{height:100%}body{margin:0;font:15px/1.6 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);background:radial-gradient(1200px 600px at 10% -10%,#101530 0%,#060812 50%),linear-gradient(180deg,var(--bg1),var(--bg0))}
+html,body{height:100%}
+body{
+  margin:0;font:15px/1.6 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);
+  background:radial-gradient(1200px 600px at 10% -10%,#101530 0%,#060812 50%),linear-gradient(180deg,var(--bg1),var(--bg0))
+}
 .bg{position:fixed;inset:0;pointer-events:none;overflow:hidden}
 .orb{position:absolute;filter:blur(40px);opacity:.25;border-radius:50%}
 .orb1{width:420px;height:420px;left:-60px;top:-80px;background:radial-gradient(circle,var(--neon1),transparent)}
@@ -19,7 +23,8 @@ html,body{height:100%}body{margin:0;font:15px/1.6 Inter,system-ui,Segoe UI,Robot
 .wordmark{font-size:16px;color:#eaeaff}
 .chip{background:linear-gradient(90deg,var(--neon2),var(--neon1));color:#08111a;padding:8px 14px;border-radius:999px;text-decoration:none;font-weight:800;border:1px solid rgba(255,255,255,.2)}
 .screen{max-width:1440px;margin:0 auto;padding:16px 12px}
-.center{display:grid;place-items:center}.hidden{display:none !important}
+.center{display:grid;place-items:center}
+.hidden{display:none !important}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
 .card-title{margin:0 0 10px;display:flex;align-items:center;gap:8px}
 .hero{display:flex;align-items:center;gap:14px;margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:16px}
