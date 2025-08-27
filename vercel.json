@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/signin", "destination": "https://learn.reboot01.com/api/auth/signin" },
+    { "source": "/api/graphql", "destination": "https://learn.reboot01.com/api/graphql-engine/v1/graphql" }
+  ]
+}
