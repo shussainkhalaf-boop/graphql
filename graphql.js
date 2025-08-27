@@ -1,16 +1,11 @@
-// graphql.js
-// Tiny GraphQL client + focused queries (Bearer JWT only; no cookies)
+// graphql.js — same-origin GraphQL via /api/graphql (rewritten in vercel.json)
 
 import { getToken } from "./auth.js";
 
-export const GRAPHQL_ENDPOINT = "https://learn.reboot01.com/api/graphql-engine/v1/graphql";
+export const GRAPHQL_ENDPOINT = "/api/graphql";
 
-/**
- * Core GraphQL fetcher.
- * - Sends Authorization: Bearer <JWT>
- * - Does NOT send credentials (avoids cross-origin cookie/CORS issues)
- */
-export async function gql(request, variables = {}) {
+/* Core fetcher */
+export async function gql(query, variables = {}) {
   const token = getToken();
   if (!token) throw new Error("Not authenticated.");
 
@@ -18,64 +13,41 @@ export async function gql(request, variables = {}) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
+      "Authorization": `Bearer ${token}`
     },
-    body: JSON.stringify({ query: request, variables }),
-    credentials: "omit"
+    body: JSON.stringify({ query, variables })
   });
 
   let json = {};
   try {
     json = await resp.json();
   } catch {
-    const text = await resp.text().catch(() => "");
-    throw new Error(text || `GraphQL HTTP ${resp.status}`);
+    const txt = await resp.text().catch(() => "");
+    throw new Error(txt || `GraphQL HTTP ${resp.status}`);
   }
 
-  if (!resp.ok) {
-    const firstErr = json?.errors?.[0]?.message;
-    throw new Error(firstErr || `GraphQL HTTP ${resp.status}`);
-  }
+  if (!resp.ok) throw new Error(json?.errors?.[0]?.message || `GraphQL HTTP ${resp.status}`);
   if (json.errors?.length) throw new Error(json.errors[0].message || "GraphQL error");
   return json.data;
 }
 
-/* ===========================
-   Queries used by the app UI
-   =========================== */
-
-/** 1) Basic user info (normal query) */
+/* Queries */
 export async function fetchUserBasic() {
-  const q = /* GraphQL */ `
-    query Me {
-      user {
-        id
-        login
-      }
-    }
-  `;
+  const q = `query { user { id login } }`;
   const data = await gql(q);
-  const me = Array.isArray(data?.user) ? data.user[0] : null;
-  return me || { id: null, login: null };
+  return Array.isArray(data?.user) ? data.user[0] : { id: null, login: null };
 }
 
-/** 2) Audit ratio (field name can vary) */
 export async function fetchUserAuditRatio() {
-  const candidates = ["auditRatio", "audit_ratio", "auditratio"];
-  for (const field of candidates) {
+  const fields = ["auditRatio", "audit_ratio", "auditratio"];
+  for (const f of fields) {
     try {
-      const q = `
-        query AuditRatio {
-          user { id login ${field} }
-        }
-      `;
+      const q = `query { user { id login ${f} } }`;
       const data = await gql(q);
       const me = data?.user?.[0];
-      if (me && Object.prototype.hasOwnProperty.call(me, field)) {
-        const v = me[field];
-        if (v == null) return null;
-        const num = Number(v);
-        return Number.isFinite(num) ? num : null;
+      if (me && Object.prototype.hasOwnProperty.call(me, f)) {
+        const v = Number(me[f]);
+        return Number.isFinite(v) ? v : null;
       }
     } catch {
       // try next candidate
@@ -84,17 +56,12 @@ export async function fetchUserAuditRatio() {
   return null;
 }
 
-/** 3) XP transactions (type 'xp') */
 export async function fetchXpTransactions({ limit = 200, sinceISO = null } = {}) {
   const whereCreated = sinceISO ? `createdAt: { _gte: $since }` : ``;
-
-  const q = /* GraphQL */ `
+  const q = `
     query XpTx($limit: Int!, $since: timestamptz) {
       transaction(
-        where: {
-          type: { _eq: "xp" }
-          ${whereCreated}
-        }
+        where: { type: { _eq: "xp" } ${whereCreated} }
         order_by: { createdAt: asc }
         limit: $limit
       ) {
@@ -112,9 +79,8 @@ export async function fetchXpTransactions({ limit = 200, sinceISO = null } = {})
   return data?.transaction ?? [];
 }
 
-/** 4) Recent progress rows (grades) */
 export async function fetchRecentProgress({ limit = 50 } = {}) {
-  const q = /* GraphQL */ `
+  const q = `
     query RecentProgress($limit: Int!) {
       progress(order_by: { createdAt: desc }, limit: $limit) {
         id
@@ -130,9 +96,8 @@ export async function fetchRecentProgress({ limit = 50 } = {}) {
   return data?.progress ?? [];
 }
 
-/** 5) Recent results with nested user (nested query example) */
 export async function fetchRecentResults({ limit = 50 } = {}) {
-  const q = /* GraphQL */ `
+  const q = `
     query RecentResults($limit: Int!) {
       result(order_by: { createdAt: desc }, limit: $limit) {
         id
@@ -142,10 +107,7 @@ export async function fetchRecentResults({ limit = 50 } = {}) {
         type
         createdAt
         path
-        user {        # nested usage
-          id
-          login
-        }
+        user { id login }
       }
     }
   `;
@@ -153,9 +115,8 @@ export async function fetchRecentResults({ limit = 50 } = {}) {
   return data?.result ?? [];
 }
 
-/** 6) Object lookup by ID (arguments query) */
 export async function fetchObjectById(id) {
-  const q = /* GraphQL */ `
+  const q = `
     query Obj($id: Int!) {
       object(where: { id: { _eq: $id }}) {
         id
@@ -169,11 +130,10 @@ export async function fetchObjectById(id) {
   return Array.isArray(data?.object) ? data.object[0] : null;
 }
 
-/** 7) Batch object lookup */
 export async function fetchObjectsByIds(ids = []) {
-  if (!ids.length) return [];
   const unique = [...new Set(ids.map(Number).filter(Number.isFinite))];
-  const q = /* GraphQL */ `
+  if (!unique.length) return [];
+  const q = `
     query Objs($ids: [Int!]) {
       object(where: { id: { _in: $ids }}) {
         id
