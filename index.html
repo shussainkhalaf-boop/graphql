@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <!-- App Shell -->
   <header class="topbar">
     <h1>My Reboot01 Profile</h1>
     <nav id="authedNav" class="hidden">
@@ -17,7 +16,6 @@
   </header>
 
   <main class="container">
-    <!-- Login Card -->
     <section id="loginSection" class="card">
       <h2>Sign in</h2>
       <p class="muted">Use your Reboot01 credentials. Supports <code>username:password</code> or <code>email:password</code>.</p>
@@ -35,10 +33,8 @@
       </form>
     </section>
 
-    <!-- Profile -->
     <section id="profileSection" class="hidden">
       <div class="grid">
-        <!-- Basic Info -->
         <article class="card">
           <h2>Basic Info</h2>
           <dl class="kv">
@@ -49,7 +45,6 @@
           </dl>
         </article>
 
-        <!-- Custom Info (choose any 3, these cover the requirement) -->
         <article class="card">
           <h2>Skills (Top)</h2>
           <ul id="skillsList" class="list"></ul>
@@ -61,7 +56,6 @@
         </article>
       </div>
 
-      <!-- SVG Charts -->
       <section class="card">
         <h2>Statistics (SVG)</h2>
         <div class="charts">
@@ -82,12 +76,7 @@
     <small>Powered by GraphQL • <code>https://learn.reboot01.com/api/graphql-engine/v1/graphql</code></small>
   </footer>
 
-  <!-- App scripts -->
-  <script src="./utils.js"></script>
-  <script src="./auth.js"></script>
-  <script src="./graphql.js"></script>
-  <script src="./charts.js"></script>
-  <script src="./app.js"></script>
+  <!-- Single module entry (do NOT include utils.js/auth.js/graphql.js/charts.js directly) -->
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
-
