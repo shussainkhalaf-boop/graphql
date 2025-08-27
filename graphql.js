@@ -1,4 +1,4 @@
-// graphs.js
+// graphs.js — simple SVG helpers for charts
 (function () {
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
   function mk(tag, attrs = {}, parent = null) {
@@ -9,7 +9,8 @@
   }
   function scale(v, d0, d1, r0, r1) {
     if (d1 === d0) return (r0 + r1) / 2;
-    return r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
+    const t = (v - d0) / (d1 - d0);
+    return r0 + t * (r1 - r0);
   }
   function drawAxes(svg, pad) {
     const g = mk("g", { stroke: "#2b3f5b", "stroke-width": "1", fill: "none" }, svg);
