@@ -3,80 +3,163 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Reboot01 • My Profile</title>
-  <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="./style.css" />
+  <title>GraphQL Profile</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="./style.css?v=4" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>My Reboot01 Profile</h1>
-    <nav id="authedNav" class="hidden">
-      <button id="logoutBtn" class="secondary">Log out</button>
+  <div class="bg">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="gridlines"></div>
+  </div>
+
+  <header class="topbar glass">
+    <div class="brand">
+      <!-- Inline SVG Logo -->
+      <svg class="logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#7c3aed"/>
+            <stop offset="100%" stop-color="#06b6d4"/>
+          </linearGradient>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <circle cx="60" cy="60" r="52" fill="url(#grad)" stroke="#ffffff33" stroke-width="6" filter="url(#glow)"/>
+        <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
+      </svg>
+      <span class="wordmark">GraphQL Profile</span>
+    </div>
+    <nav class="nav">
+      <a href="#" id="btn-logout" class="chip">Logout</a>
     </nav>
   </header>
 
-  <main class="container">
-    <section id="loginSection" class="card">
-      <h2>Sign in</h2>
-      <p class="muted">Use your Reboot01 credentials. Supports <code>username:password</code> or <code>email:password</code>.</p>
-      <form id="loginForm" autocomplete="on">
-        <label>
-          Username or Email
-          <input id="loginId" name="loginId" type="text" required placeholder="username or email" />
-        </label>
-        <label>
-          Password
-          <input id="password" name="password" type="password" required placeholder="••••••••" />
-        </label>
-        <button id="loginBtn" type="submit">Sign in</button>
-        <p id="loginError" class="error hidden" role="alert"></p>
-      </form>
-    </section>
-
-    <section id="profileSection" class="hidden">
-      <div class="grid">
-        <article class="card">
-          <h2>Basic Info</h2>
-          <dl class="kv">
-            <div><dt>User ID</dt><dd id="userId">—</dd></div>
-            <div><dt>Login</dt><dd id="userLogin">—</dd></div>
-            <div><dt>Audit Ratio</dt><dd id="auditRatio">—</dd></div>
-            <div><dt>Total XP</dt><dd id="totalXp">—</dd></div>
-          </dl>
-        </article>
-
-        <article class="card">
-          <h2>Skills (Top)</h2>
-          <ul id="skillsList" class="list"></ul>
-        </article>
-
-        <article class="card">
-          <h2>Recent Grades</h2>
-          <ul id="gradesList" class="list"></ul>
-        </article>
-      </div>
-
-      <section class="card">
-        <h2>Statistics (SVG)</h2>
-        <div class="charts">
-          <figure>
-            <figcaption>XP over Time</figcaption>
-            <svg id="xpOverTime" viewBox="0 0 640 280" role="img" aria-label="XP over time chart"></svg>
-          </figure>
-          <figure>
-            <figcaption>Pass / Fail Ratio</figcaption>
-            <svg id="passFailRatio" viewBox="0 0 320 320" role="img" aria-label="Pass fail ratio chart"></svg>
-          </figure>
+  <!-- LOGIN -->
+  <main id="screen-login" class="screen center">
+    <section class="card card-login glass">
+      <div class="login-head">
+        <!-- Same SVG logo reused -->
+        <div class="logo-wrap">
+          <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
+            <defs>
+              <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#7c3aed"/>
+                <stop offset="100%" stop-color="#06b6d4"/>
+              </linearGradient>
+            </defs>
+            <circle cx="60" cy="60" r="52" fill="url(#grad2)" stroke="#ffffff33" stroke-width="6"/>
+            <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
+          </svg>
         </div>
-      </section>
+        <h1>Welcome back</h1>
+        <p class="muted">Sign in to fetch your data from GraphQL.</p>
+      </div>
+      <form id="login-form" autocomplete="on">
+        <label class="field">
+          <span>Username or Email</span>
+          <input id="identity" name="identity" type="text" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input id="password" name="password" type="password" required />
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" id="remember" checked />
+          <span>Remember me</span>
+        </label>
+        <button type="submit" id="btn-login" class="btn">Get JWT</button>
+        <p id="login-error" class="error hidden"></p>
+      </form>
     </section>
   </main>
 
-  <footer class="footer">
-    <small>Powered by GraphQL • <code>https://learn.reboot01.com/api/graphql-engine/v1/graphql</code></small>
-  </footer>
+  <!-- APP -->
+  <main id="screen-app" class="screen">
+    <section class="hero glass">
+      <div class="logo-wrap">
+        <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
+          <defs>
+            <linearGradient id="grad3" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#7c3aed"/>
+              <stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" r="52" fill="url(#grad3)" stroke="#ffffff33" stroke-width="6"/>
+          <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
+        </svg>
+      </div>
+      <div class="hero-text">
+        <h2 id="hero-name">Your profile</h2>
+        <p class="muted">Track your XP, results and projects in style.</p>
+      </div>
+    </section>
 
-  <!-- Single module entry (do NOT include utils.js/auth.js/graphql.js/charts.js directly) -->
-  <script type="module" src="./app.js"></script>
+    <section class="grid three">
+      <section class="card glass">
+        <h3 class="card-title"><span class="ic ic-user"></span> Basics</h3>
+        <div class="kv">
+          <div><span class="k">ID</span><span id="u-id" class="v">-</span></div>
+          <div><span class="k">Login</span><span id="u-login" class="v">-</span></div>
+          <div><span class="k">First</span><span id="u-first" class="v">-</span></div>
+          <div><span class="k">Last</span><span id="u-last" class="v">-</span></div>
+        </div>
+      </section>
+
+      <section class="card glass">
+        <h3 class="card-title"><span class="ic ic-stats"></span> Quick stats</h3>
+        <div class="kv">
+          <div><span class="k">Total XP</span><span id="xp-total" class="v">-</span></div>
+          <div><span class="k">Audit ratio</span><span id="audit-ratio" class="v">-</span></div>
+          <div><span class="k">Passed</span><span id="passed-count" class="v">-</span></div>
+          <div><span class="k">Failed</span><span id="failed-count" class="v">-</span></div>
+        </div>
+      </section>
+
+      <section class="card glass">
+        <h3 class="card-title"><span class="ic ic-rocket"></span> Recent projects</h3>
+        <div id="projects" class="projects"></div>
+      </section>
+    </section>
+
+    <section class="grid two">
+      <section class="card glass">
+        <h3 class="card-title"><span class="ic ic-line"></span> XP over time</h3>
+        <div class="chart">
+          <svg id="svg-xp" viewBox="0 0 680 280"></svg>
+        </div>
+      </section>
+      <section class="card glass">
+        <h3 class="card-title"><span class="ic ic-donut"></span> Pass vs Fail</h3>
+        <div class="chart center">
+          <svg id="svg-ratio" viewBox="0 0 280 280"></svg>
+        </div>
+      </section>
+    </section>
+
+    <section class="card glass">
+      <h3 class="card-title"><span class="ic ic-bars"></span> XP by project type</h3>
+      <div class="chart">
+        <svg id="svg-type" viewBox="0 0 680 300"></svg>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot glass"></footer>
+
+  <script>
+    window.__CONFIG__ = {
+      SIGNIN_URL: "https://learn.reboot01.com/api/auth/signin",
+      GRAPHQL_URL: "https://learn.reboot01.com/api/graphql-engine/v1/graphql"
+    };
+  </script>
+  <script src="./graphs.js?v=4"></script>
+  <script src="./app.js?v=4"></script>
 </body>
 </html>
