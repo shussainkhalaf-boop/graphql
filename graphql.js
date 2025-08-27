@@ -1,5 +1,5 @@
 // graphql.js
-// Tiny GraphQL client + focused queries for the Reboot01 profile project.
+// Tiny GraphQL client + focused queries (Bearer JWT only; no cookies)
 
 import { getToken } from "./auth.js";
 
@@ -7,29 +7,27 @@ export const GRAPHQL_ENDPOINT = "https://learn.reboot01.com/api/graphql-engine/v
 
 /**
  * Core GraphQL fetcher.
- * - Sends Authorization: Bearer <JWT> if we have it
- * - Always sends credentials for cookie-based sessions
+ * - Sends Authorization: Bearer <JWT>
+ * - Does NOT send credentials (avoids cross-origin cookie/CORS issues)
  */
 export async function gql(request, variables = {}) {
   const token = getToken();
-
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (!token) throw new Error("Not authenticated.");
 
   const resp = await fetch(GRAPHQL_ENDPOINT, {
     method: "POST",
-    headers,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
+    },
     body: JSON.stringify({ query: request, variables }),
-    credentials: "include", // allow cookie-based auth fallback
-    mode: "cors",
+    credentials: "omit"
   });
 
-  // Try to parse JSON either way
   let json = {};
   try {
     json = await resp.json();
   } catch {
-    // If non-JSON response, surface a readable error
     const text = await resp.text().catch(() => "");
     throw new Error(text || `GraphQL HTTP ${resp.status}`);
   }
@@ -38,9 +36,7 @@ export async function gql(request, variables = {}) {
     const firstErr = json?.errors?.[0]?.message;
     throw new Error(firstErr || `GraphQL HTTP ${resp.status}`);
   }
-  if (json.errors?.length) {
-    throw new Error(json.errors[0].message || "GraphQL error");
-  }
+  if (json.errors?.length) throw new Error(json.errors[0].message || "GraphQL error");
   return json.data;
 }
 
@@ -63,7 +59,7 @@ export async function fetchUserBasic() {
   return me || { id: null, login: null };
 }
 
-/** 2) Audit ratio (field name can vary across schemas) */
+/** 2) Audit ratio (field name can vary) */
 export async function fetchUserAuditRatio() {
   const candidates = ["auditRatio", "audit_ratio", "auditratio"];
   for (const field of candidates) {
@@ -88,9 +84,8 @@ export async function fetchUserAuditRatio() {
   return null;
 }
 
-/** 3) Transactions of type 'xp' (for XP over time / by project) */
+/** 3) XP transactions (type 'xp') */
 export async function fetchXpTransactions({ limit = 200, sinceISO = null } = {}) {
-  // Hasura-style filtering; createdAt type is typically timestamptz
   const whereCreated = sinceISO ? `createdAt: { _gte: $since }` : ``;
 
   const q = /* GraphQL */ `
@@ -117,7 +112,7 @@ export async function fetchXpTransactions({ limit = 200, sinceISO = null } = {})
   return data?.transaction ?? [];
 }
 
-/** 4) Recent progress rows (grades); grade 1=PASS, 0=FAIL in examples */
+/** 4) Recent progress rows (grades) */
 export async function fetchRecentProgress({ limit = 50 } = {}) {
   const q = /* GraphQL */ `
     query RecentProgress($limit: Int!) {
@@ -158,7 +153,7 @@ export async function fetchRecentResults({ limit = 50 } = {}) {
   return data?.result ?? [];
 }
 
-/** 6) Object lookup by ID (query with arguments) */
+/** 6) Object lookup by ID (arguments query) */
 export async function fetchObjectById(id) {
   const q = /* GraphQL */ `
     query Obj($id: Int!) {
@@ -174,7 +169,7 @@ export async function fetchObjectById(id) {
   return Array.isArray(data?.object) ? data.object[0] : null;
 }
 
-/** 7) Batch object lookup (cuts round-trips) */
+/** 7) Batch object lookup */
 export async function fetchObjectsByIds(ids = []) {
   if (!ids.length) return [];
   const unique = [...new Set(ids.map(Number).filter(Number.isFinite))];
