@@ -1,4 +1,5 @@
-// Neon SVG helpers
+// SVG helpers: line, donut, bar
+
 function drawLineChart(selector, series, opts){
   const svg = document.querySelector(selector); svg.innerHTML = "";
   const W=680,H=280,P={l:46,r:10,t:18,b:34}; svg.setAttribute("viewBox","0 0 "+W+" "+H);
