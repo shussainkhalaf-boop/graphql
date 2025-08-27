@@ -1,182 +1,180 @@
-// graphql.js
-// Tiny GraphQL client + a handful of focused queries for the project.
+// app.js — ES module entry
+import { mountAuthUI, isAuthed } from "./auth.js";
+import {
+  fetchUserBasic,
+  fetchUserAuditRatio,
+  fetchXpTransactions,
+  fetchRecentProgress,
+  fetchRecentResults,
+  fetchObjectsByIds,
+} from "./graphql.js";
+import {
+  setText,
+  setList,
+  formatDate,
+  sumBy,
+  groupBy,
+  toPairs,
+  parseISO,
+  clearSvg,
+  niceNumber,
+} from "./utils.js";
+import { drawXpLineChart, drawDonut } from "./charts.js";
 
-import { getToken } from "./auth.js";
+/* ---------------- Small helpers ---------------- */
+function setStatus(svgEl, msg) {
+  clearSvg(svgEl);
+  const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  t.setAttribute("x", "50%");
+  t.setAttribute("y", "50%");
+  t.setAttribute("text-anchor", "middle");
+  t.textContent = msg;
+  svgEl.appendChild(t);
+}
 
-export const GRAPHQL_ENDPOINT = "https://learn.reboot01.com/api/graphql-engine/v1/graphql";
+function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
-/** Core fetcher */
-export async function gql(request, variables = {}) {
-  const token = getToken();
-  if (!token) throw new Error("Not authenticated.");
+/* --------------- Render sections --------------- */
+async function renderBasicInfo() {
+  const me = await fetchUserBasic(); // normal query
+  setText("userId", me?.id ?? "—");
+  setText("userLogin", me?.login ?? "—");
 
-  const resp = await fetch(GRAPHQL_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify({ query: request, variables }),
+  const auditRatio = await fetchUserAuditRatio();
+  setText("auditRatio", auditRatio == null ? "—" : `${(auditRatio * 100).toFixed(1)}%`);
+}
+
+async function renderXpAndCharts() {
+  const xpSvg = document.getElementById("xpOverTime");
+  const pfSvg = document.getElementById("passFailRatio");
+
+  setStatus(xpSvg, "Loading…");
+  setStatus(pfSvg, "Loading…");
+
+  // XP transactions (type 'xp')
+  const tx = await fetchXpTransactions({ limit: 1000 });
+
+  // Total XP
+  const totalXp = sumBy(tx, (t) => t.amount);
+  setText("totalXp", niceNumber(totalXp));
+
+  // Build cumulative daily series for the line chart
+  const byDay = groupBy(tx, (t) => String(t.createdAt || "").slice(0, 10)); // YYYY-MM-DD
+  const dayPairs = toPairs(byDay)
+    .map(([day, arr]) => ({ day, sum: sumBy(arr, (t) => t.amount) }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  let running = 0;
+  const xpSeries = dayPairs.map(({ day, sum }) => {
+    running += sum;
+    return { date: parseISO(day), value: running };
   });
 
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(json?.errors?.[0]?.message || `GraphQL HTTP ${resp.status}`);
+  clearSvg(xpSvg);
+  if (xpSeries.length) {
+    drawXpLineChart(xpSvg, xpSeries);
+  } else {
+    setStatus(xpSvg, "No XP data yet.");
   }
-  if (json.errors && json.errors.length) {
-    // Surface the first error to keep things simple
-    throw new Error(json.errors[0].message || "GraphQL error");
+
+  // Recent grades (prefer progress; fallback to result if empty)
+  let progress = await fetchRecentProgress({ limit: 50 });
+  if (!progress?.length) {
+    const results = await fetchRecentResults({ limit: 50 }); // nested query usage
+    progress = results.map(r => ({
+      id: r.id,
+      objectId: r.objectId,
+      grade: r.grade,
+      createdAt: r.createdAt,
+      path: r.path,
+    }));
   }
-  return json.data;
-}
 
-/* ===========================
-   Queries we’ll use in app.js
-   =========================== */
+  // Grades list
+  const items = progress.map((p) => ({
+    when: formatDate(p.createdAt),
+    grade: Number(p.grade) === 1 ? "PASS" : "FAIL",
+    path: p.path || `#${p.objectId}`,
+  }));
+  setList("gradesList", items, (it) => {
+    const ok = it.grade === "PASS";
+    return `
+      <span>${it.path}</span>
+      <span class="${ok ? '' : 'muted'}">${it.grade}</span>
+      <span class="muted">${it.when}</span>
+    `;
+  });
 
-/** 1) Basic user info (normal query) */
-export async function fetchUserBasic() {
-  const q = /* GraphQL */ `
-    query Me {
-      user {
-        id
-        login
-      }
-    }
-  `;
-  const data = await gql(q);
-  // API returns an array; we take the first (current user)
-  const me = Array.isArray(data?.user) ? data.user[0] : null;
-  return me || { id: null, login: null };
-}
+  // Pass/Fail donut
+  const pass = progress.filter((p) => Number(p.grade) === 1).length;
+  const fail = clamp(progress.length - pass, 0, Number.MAX_SAFE_INTEGER);
+  clearSvg(pfSvg);
+  drawDonut(pfSvg, pass, fail);
 
-/** 2) Try to fetch audit ratio from user (field name can differ by schema version).
- *    We attempt a few likely names; if all fail we return null gracefully. */
-export async function fetchUserAuditRatio() {
-  const candidates = [
-    "auditRatio",
-    "audit_ratio",
-    "auditratio",
-  ];
-  for (const field of candidates) {
-    try {
-      const q = `
-        query AuditRatio {
-          user { id login ${field} }
-        }
-      `;
-      const data = await gql(q);
-      const me = data?.user?.[0];
-      if (me && field in me && typeof me[field] !== "undefined") {
-        return Number(me[field]);
-      }
-    } catch {
-      // try next field name
-    }
+  // "Skills (Top)" — show top projects by XP (arguments query via object lookup)
+  const byObject = groupBy(tx.filter(t => Number.isFinite(Number(t.objectId))), (t) => t.objectId);
+  const topPairs = toPairs(byObject)
+    .map(([objectId, arr]) => ({ objectId: Number(objectId), xp: sumBy(arr, a => a.amount) }))
+    .sort((a, b) => b.xp - a.xp)
+    .slice(0, 5);
+
+  if (topPairs.length) {
+    const ids = topPairs.map(p => p.objectId);
+    const objs = await fetchObjectsByIds(ids); // query with arguments
+    const nameById = new Map(objs.map(o => [o.id, o.name || `(object ${o.id})`]));
+    setList("skillsList", topPairs, (p) => {
+      const name = nameById.get(p.objectId) || `(object ${p.objectId})`;
+      return `<span>${name}</span><span class="muted">${niceNumber(p.xp)} XP</span>`;
+    });
+  } else {
+    setList("skillsList", []);
   }
-  return null;
 }
 
-/** 3) Transactions of type 'xp' (for XP over time / by project, etc.) */
-export async function fetchXpTransactions({ limit = 200, sinceISO = null } = {}) {
-  // Filter by type 'xp' and optionally by createdAt >= sinceISO
-  // Adjust where clause depending on API capabilities. Hasura-style shown here.
-  const q = /* GraphQL */ `
-    query XpTx($limit: Int!, $since: timestamptz) {
-      transaction(
-        where: {
-          type: { _eq: "xp" }
-          ${/* when since provided, filter */""}
-          ${/* createdAt may be timestamptz or text; schema uses T format in examples */""}
-          ${sinceISO ? `createdAt: { _gte: $since }` : ``}
-        }
-        order_by: { createdAt: asc }
-        limit: $limit
-      ) {
-        id
-        amount
-        objectId
-        userId
-        createdAt
-        path
-      }
-    }
-  `;
-  const vars = { limit, since: sinceISO };
-  const data = await gql(q, vars);
-  return data?.transaction ?? [];
+async function loadProfile() {
+  try {
+    await renderBasicInfo();
+  } catch (e) {
+    console.error("Basic info error:", e);
+    setText("userId", "—");
+    setText("userLogin", "—");
+    setText("auditRatio", "—");
+  }
+
+  try {
+    await renderXpAndCharts();
+  } catch (e) {
+    console.error("Data/charts error:", e);
+    // Graceful fallbacks on visible charts/sections
+    const xpSvg = document.getElementById("xpOverTime");
+    const pfSvg = document.getElementById("passFailRatio");
+    setStatus(xpSvg, "Failed to load XP data");
+    setStatus(pfSvg, "Failed to load ratio");
+    setList("gradesList", []);
+    setList("skillsList", []);
+    setText("totalXp", "—");
+  }
 }
 
-/** 4) Recent progress rows (grades); grade 1=PASS, 0=FAIL in examples */
-export async function fetchRecentProgress({ limit = 50 } = {}) {
-  const q = /* GraphQL */ `
-    query RecentProgress($limit: Int!) {
-      progress(order_by: { createdAt: desc }, limit: $limit) {
-        id
-        userId
-        objectId
-        grade
-        createdAt
-        path
-      }
-    }
-  `;
-  const data = await gql(q, { limit });
-  return data?.progress ?? [];
-}
+/* -------------------- Boot -------------------- */
+document.addEventListener("DOMContentLoaded", () => {
+  // Wire the login/logout UI and initial state
+  mountAuthUI();
 
-/** 5) Recent results (alternate source of grades/progression) with nested user (nested query) */
-export async function fetchRecentResults({ limit = 50 } = {}) {
-  const q = /* GraphQL */ `
-    query RecentResults($limit: Int!) {
-      result(order_by: { createdAt: desc }, limit: $limit) {
-        id
-        objectId
-        userId
-        grade
-        type
-        createdAt
-        path
-        user {           # nested usage example
-          id
-          login
-        }
-      }
-    }
-  `;
-  const data = await gql(q, { limit });
-  return data?.result ?? [];
-}
+  // If already authed, load profile
+  if (isAuthed()) loadProfile();
 
-/** 6) Object lookup by ID (query with arguments) */
-export async function fetchObjectById(id) {
-  const q = /* GraphQL */ `
-    query Obj($id: Int!) {
-      object(where: { id: { _eq: $id }}) {
-        id
-        name
-        type
-        attrs
-      }
-    }
-  `;
-  const data = await gql(q, { id });
-  return Array.isArray(data?.object) ? data.object[0] : null;
-}
-
-/** 7) Batch object lookup (small batching to cut round-trips) */
-export async function fetchObjectsByIds(ids = []) {
-  if (!ids.length) return [];
-  const unique = [...new Set(ids.filter((v) => Number.isFinite(Number(v))))];
-  const q = /* GraphQL */ `
-    query Objs($ids: [Int!]) {
-      object(where: { id: { _in: $ids }}) {
-        id
-        name
-        type
-      }
-    }
-  `;
-  const data = await gql(q, { ids: unique });
-  return data?.object ?? [];
-}
+  // React to auth changes
+  document.addEventListener("auth:signin", loadProfile);
+  document.addEventListener("auth:signout", () => {
+    // Clear visible data on logout
+    clearSvg(document.getElementById("xpOverTime"));
+    clearSvg(document.getElementById("passFailRatio"));
+    setText("userId", "—");
+    setText("userLogin", "—");
+    setText("auditRatio", "—");
+    setText("totalXp", "—");
+    setList("gradesList", []);
+    setList("skillsList", []);
+  });
+});
