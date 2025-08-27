@@ -1,242 +1,148 @@
-// Minimal, robust frontend for Reboot01 profile (no external libs).
-// 1) Sign in via worker (preferred) or use an existing JWT.
-// 2) Query GraphQL for user, XP, projects.
-// 3) Render SVG charts using graphs.js.
+// same as previous neon version JS (no image refs), kept for brevity
+// Neon version JS (ASCII only)
+const { SIGNIN_URL, GRAPHQL_URL } = window.__CONFIG__;
 
-const qs = (sel) => document.querySelector(sel);
-const $ = (id) => document.getElementById(id);
+const el = (id) => document.getElementById(id);
+const $login = el("screen-login");
+const $app = el("screen-app");
+const $err = el("login-error");
+const $btnLogout = el("btn-logout");
+const TOKEN_KEY = "reboot01.jwt";
 
-const STATE = {
-  token: localStorage.getItem("JWT") || "",
-  workerBase: (window.CONFIG && window.CONFIG.WORKER_BASE) || "",
-  graphqlUrl: (window.CONFIG && window.CONFIG.GRAPHQL_URL) || "",
-};
-
-function setStatus(msg, isError=false){
-  const box = $("signinStatus");
-  box.textContent = msg || "";
-  box.style.color = isError ? "#ff9aa5" : "#9cd67c";
+function setScreen(authed) {
+  if (authed) { $login.classList.add("hidden"); $app.classList.remove("hidden"); }
+  else { $app.classList.add("hidden"); $login.classList.remove("hidden"); }
 }
+function b64urlDecode(input){ input=input.replace(/-/g,"+").replace(/_/g,"/"); const pad=input.length%4; if(pad) input+="=".repeat(4-pad); return atob(input); }
+function parseJwt(token){ try{ return JSON.parse(b64urlDecode(token.split(".")[1])); }catch{return null;} }
 
-function saveToken(jwt){
-  STATE.token = jwt;
-  localStorage.setItem("JWT", jwt);
+async function signin(identity, password) {
+  const basic = btoa(identity + ":" + password);
+  const res = await fetch(SIGNIN_URL, { method: "POST", headers: { authorization: "Basic " + basic } });
+  if (!res.ok) { const text = await res.text(); throw new Error(text || "Signin failed (" + res.status + ")"); }
+  return await res.text();
 }
-
-function authHeaders(){
-  return STATE.token ? {"Authorization": `Bearer ${STATE.token}`} : {};
-}
-
-async function httpJson(url, options={}){
-  const res = await fetch(url, options);
-  const text = await res.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : {}; } catch(e){ /* not json */ }
-  if (!res.ok){
-    const msg = data && data.error ? data.error : text || `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return {res, data, text};
-}
-
-// Sign-in flow:
-// - If workerBase is set, POST {login, password} to `${workerBase}/signin`
-//   The worker should return 200 and include an Authorization header with JWT.
-// - Otherwise, user can paste a valid JWT into the password field (advanced).
-async function handleSignin(e){
-  e.preventDefault();
-  const login = $("login").value.trim();
-  const password = $("password").value;
-
-  try {
-    setStatus("Signing in...");
-    $("signinBtn").disabled = true;
-
-    if (STATE.workerBase){
-      const url = STATE.workerBase.replace(/\/$/, "") + "/signin";
-      const {res, data, text} = await httpJson(url, {
-        method: "POST",
-        headers: {"content-type":"application/json"},
-        body: JSON.stringify({login, password})
-      });
-      // JWT from header or body
-      const hAuth = res.headers.get("authorization") || res.headers.get("Authorization") || "";
-      let jwt = "";
-      if (hAuth && /bearer\s+/i.test(hAuth)) jwt = hAuth.split(/\s+/).pop();
-      if (!jwt){
-        // try body
-        jwt = (data && data.token) || (data && data.jwt) || "";
-        if (!jwt){
-          // last attempt: text search
-          jwt = (text.match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)||[])[0] || "";
-        }
-      }
-      if (!jwt || !jwt.includes(".")){
-        throw new Error("Could not extract JWT from sign-in response.");
-      }
-      saveToken(jwt);
-      setStatus("Signed in successfully.");
-    } else {
-      // expert mode: treat password field as raw JWT
-      if (password.split(".").length === 3){
-        saveToken(password);
-        setStatus("JWT saved locally.");
-      } else {
-        throw new Error("Worker is not configured. Set WORKER_BASE or paste a valid JWT as password.");
-      }
-    }
-
-    await loadAll();
-  } catch (err){
-    console.error(err);
-    setStatus("Sign-in failed: " + err.message, true);
-  } finally {
-    $("signinBtn").disabled = false;
-  }
-}
-
-function logout(){
-  localStorage.removeItem("JWT");
-  STATE.token = "";
-  setStatus("Logged out.");
-  ["userLogin","userId","totalXp","auditRatio","projectsCount"].forEach(id=>$(id).textContent = "—");
-  $("projectsList").innerHTML = "";
-  window.drawAreaChart($("xpChart"), []);
-  window.drawBarChart($("projectsChart"), []);
-}
-
 async function gql(query, variables={}){
-  const body = JSON.stringify({query, variables});
-  const url = STATE.workerBase ? STATE.workerBase.replace(/\/$/, "") + "/graphql" : STATE.graphqlUrl;
-  const {data} = await httpJson(url, {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const res = await fetch(GRAPHQL_URL, {
     method: "POST",
-    headers: {"content-type":"application/json", ...authHeaders()},
-    body
+    headers: { "content-type":"application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ query, variables })
   });
-  if (data.errors){
-    throw new Error(data.errors.map(e=>e.message).join("; "));
-  }
-  return data.data || data;
+  const data = await res.json();
+  if (data.errors) throw new Error(data.errors.map(e=>e.message).join("; "));
+  return data.data;
 }
 
-// GraphQL queries (Hasura-like schema)
-const QUERY_USER = `
-query Me {
-  user {
-    id
-    login
-    auditRatio
-  }
-}
-`;
+// Queries
+const Q_USER = "{ user { id login firstName lastName } }";
+const Q_XP = `query XP($uid:Int!,$limit:Int!){ transaction(where:{userId:{_eq:$uid}, type:{_eq:"xp"}}, order_by:{createdAt:asc}, limit:$limit){ amount createdAt objectId path } }`;
+const Q_RESULTS = "{ result(order_by:{createdAt:desc}, limit:200){ id grade type createdAt objectId user{ id login } } }";
+const Q_PROGRESS = "query P($limit:Int!){ progress(order_by:{createdAt:desc}, limit:$limit){ objectId grade createdAt path userId } }";
+const Q_OBJECTS = "query O($ids:[Int!]){ object(where:{ id:{ _in:$ids } }){ id type name } }";
 
-const QUERY_XP = `
-query XpByDay {
-  transaction(where: {type: {_eq: "xp"}}, order_by: {createdAt: asc}) {
-    amount
-    createdAt
-    path
-  }
-}
-`;
-
-const QUERY_PROJECTS = `
-query MyProjects {
-  transaction(where: {type: {_eq: "xp"}}, order_by: {amount: desc}, limit: 20) {
-    amount
-    path
-    createdAt
-  }
-}
-`;
-
-function formatNumber(n){
-  return new Intl.NumberFormat().format(Math.round(n));
-}
-
-function dayKey(iso){
-  const d = new Date(iso);
-  return d.toISOString().slice(0,10);
-}
-
-function extractProjectName(path){
-  // typical path example: /johndoe/div-01/c-piscine-js/ex00
-  if (!path || typeof path !== "string") return "Unknown";
-  const parts = path.split("/").filter(Boolean);
-  // last project folder under cohort - heuristic: take last non-numeric-ish
-  const last = parts[parts.length-1];
-  const name = last || parts.at(-2) || "Unknown";
-  return name;
-}
+function fmtDate(s){ return new Date(s).toLocaleString(); }
 
 async function loadAll(){
-  if (!STATE.token){
-    setStatus("Please sign in to load data.", true);
-    return;
+  const u = await gql(Q_USER);
+  const user = (u && u.user && u.user[0]) || null;
+  if(!user) throw new Error("Cannot read user");
+  el("u-id").textContent = user.id; el("u-login").textContent = user.login;
+  el("u-first").textContent = user.firstName || "-"; el("u-last").textContent = user.lastName || "-";
+  el("hero-name").textContent = user.login + " • Profile";
+
+  const xpData = await gql(Q_XP, { uid: user.id, limit: 900 });
+  const xp = xpData.transaction || [];
+  const total = xp.reduce((s,x)=> s + (x.amount||0), 0);
+  el("xp-total").textContent = total.toLocaleString();
+
+  // series
+  const byDay = {};
+  xp.forEach(x=>{ const d=new Date(x.createdAt).toISOString().slice(0,10); byDay[d]=(byDay[d]||0)+x.amount; });
+  const series = Object.entries(byDay).sort((a,b)=> a[0].localeCompare(b[0]))
+                 .map(([date,value])=>({x:date,y:value}));
+  drawLineChart("#svg-xp", series, { yLabel: "XP" });
+
+  // results
+  const r = await gql(Q_RESULTS);
+  const results = r.result || [];
+  const passed = results.filter(x=>x.grade===1).length;
+  const failed = results.filter(x=>x.grade===0).length;
+  el("passed-count").textContent = passed; el("failed-count").textContent = failed;
+  el("audit-ratio").textContent = passed+failed>0 ? (passed/(passed+failed)).toFixed(2) : "-";
+  drawDonut("#svg-ratio", [
+    {label:"PASS", value:passed, cls:"slice-pass"},
+    {label:"FAIL", value:failed, cls:"slice-fail"}
+  ]);
+
+  // progress + objects (project cards + bar chart)
+  const pr = await gql(Q_PROGRESS, { limit: 24 });
+  const items = pr.progress || [];
+  const projBox = document.getElementById("projects"); projBox.innerHTML = "";
+  const ids = Array.from(new Set(items.map(it=>it.objectId))).slice(0,120);
+  let objMap = {};
+  if (ids.length) {
+    const objs = await gql(Q_OBJECTS, { ids });
+    (objs.object || []).forEach(o => objMap[o.id] = o);
   }
-  setStatus("Loading data...");
-  try {
-    const [me, xp, prj] = await Promise.all([
-      gql(QUERY_USER),
-      gql(QUERY_XP),
-      gql(QUERY_PROJECTS),
-    ]);
+  // Bar chart
+  const typeCount = {};
+  items.forEach(it=>{ const t=(objMap[it.objectId] && objMap[it.objectId].type) || "unknown"; typeCount[t]=(typeCount[t]||0)+1; });
+  const typeData = Object.entries(typeCount).map(([label,value])=>({label,value}));
+  drawBarChart("#svg-type", typeData);
 
-    // User
-    const user = me.user && me.user[0] ? me.user[0] : (Array.isArray(me.user)? me.user[0] : me.user);
-    $("userLogin").textContent = user?.login || "—";
-    $("userId").textContent   = user?.id ?? "—";
-    $("auditRatio").textContent = (user?.auditRatio != null) ? Number(user.auditRatio).toFixed(2) : "—";
-
-    // XP totals & chart
-    const tx = xp.transaction || [];
-    const totalXp = tx.reduce((sum,t)=>sum + (t.amount||0), 0);
-    $("totalXp").textContent = formatNumber(totalXp);
-
-    const grouped = {};
-    for (const t of tx){
-      const k = dayKey(t.createdAt);
-      grouped[k] = (grouped[k]||0) + (t.amount||0);
-    }
-    const points = Object.entries(grouped)
-      .sort((a,b)=>a[0]<b[0]?-1:1)
-      .map(([k,v],i)=>({x:i, y:v}));
-    drawAreaChart($("xpChart"), points);
-
-    // Projects list + bar chart
-    const items = {};
-    for (const t of prj.transaction || []){
-      const name = extractProjectName(t.path);
-      items[name] = (items[name]||0) + (t.amount||0);
-    }
-    const top = Object.entries(items)
-      .map(([label,value])=>({label, value}))
-      .sort((a,b)=>b.value-a.value)
-      .slice(0,10);
-    $("projectsCount").textContent = Object.keys(items).length || "0";
-    drawBarChart($("projectsChart"), top);
-
-    const list = $("projectsList");
-    list.innerHTML = "";
-    top.forEach(it=>{
-      const el = document.createElement("div");
-      el.className = "item";
-      el.innerHTML = `<div class="left"><span class="tag">${it.label}</span></div><div>${formatNumber(it.value)} XP</div>`;
-      list.appendChild(el);
-    });
-
-    setStatus("Done.");
-  } catch (err){
-    console.error(err);
-    setStatus("Load failed: " + err.message, true);
-  }
+  // project cards
+  items.slice(0,12).forEach(it=>{
+    const o = objMap[it.objectId];
+    const div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML =
+      '<div class="title">' + (o ? o.name : "Object " + it.objectId) + '</div>' +
+      '<div class="meta">id: ' + it.objectId + ' — type: ' + ((o && o.type) || "n/a") + "</div>" +
+      '<div class="meta">grade: ' + it.grade + "</div>" +
+      '<div class="meta">' + (it.path||"") + "</div>" +
+      '<div class="meta">' + fmtDate(it.createdAt) + "</div>";
+    projBox.appendChild(div);
+  });
 }
 
-function init(){
-  $("signinForm").addEventListener("submit", handleSignin);
-  $("logoutBtn").addEventListener("click", logout);
-  if (STATE.token){
-    loadAll();
+document.getElementById("login-form").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  $err.classList.add("hidden");
+  const identity = document.getElementById("identity").value.trim();
+  const password = document.getElementById("password").value;
+  const remember = document.getElementById("remember").checked;
+  const btn = document.getElementById("btn-login");
+  btn.disabled = true; btn.textContent = "Signing in...";
+  try{
+    const jwt = await signin(identity, password);
+    if (remember) localStorage.setItem(TOKEN_KEY, jwt);
+    else sessionStorage.setItem(TOKEN_KEY, jwt);
+    localStorage.setItem(TOKEN_KEY, jwt);
+    setScreen(true);
+    await loadAll();
+  }catch(err){
+    $err.textContent = (""+err.message).slice(0,300);
+    $err.classList.remove("hidden");
+  }finally{
+    btn.disabled = false; btn.textContent = "Get JWT";
   }
-}
-init();
+});
+
+$btnLogout.addEventListener("click", ()=>{
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  setScreen(false);
+  ["u-id","u-login","u-first","u-last","xp-total","audit-ratio","passed-count","failed-count"]
+    .forEach(id => (document.getElementById(id).textContent = "-"));
+  document.querySelector("#svg-xp").innerHTML = "";
+  document.querySelector("#svg-ratio").innerHTML = "";
+  document.querySelector("#svg-type").innerHTML = "";
+  document.querySelector("#projects").innerHTML = "";
+});
+
+(function init(){
+  const jwt = localStorage.getItem(TOKEN_KEY);
+  if (jwt && parseJwt(jwt)) { setScreen(true); loadAll().catch(err=>{ console.error(err); localStorage.removeItem(TOKEN_KEY); setScreen(false); }); }
+  else setScreen(false);
+})();
