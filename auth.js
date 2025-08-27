@@ -1,5 +1,5 @@
 // auth.js
-// Handles sign-in (Basic -> JWT), token storage, and logout
+// Sign-in (Basic -> JWT), token storage, logout (no cross-origin credentials)
 
 const R01_AUTH_ENDPOINT = "https://learn.reboot01.com/api/auth/signin";
 const TOKEN_KEY = "r01_jwt";
@@ -23,7 +23,7 @@ export function isAuthed() {
   if (!t) return false;
   try {
     const { exp } = parseJwt(t);
-    if (!exp) return true;
+    if (!exp) return true; // if no exp, assume valid
     return Date.now() < exp * 1000;
   } catch {
     return false;
@@ -44,7 +44,6 @@ export function parseJwt(token) {
 
 /* -------------- helpers: extract token -------------- */
 function tokenFromHeaders(resp) {
-  // Common places: Authorization: Bearer <jwt>, or custom X-* headers
   const auth = resp.headers.get("authorization") || resp.headers.get("Authorization");
   if (auth && /^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, "").trim();
 
@@ -60,16 +59,15 @@ function tokenFromBodyText(text) {
   if (!text) return null;
   const trimmed = text.trim();
 
-  // Looks like a raw JWT?
+  // Raw JWT as plain text?
   if (trimmed.split(".").length === 3) return trimmed;
 
-  // Looks like JSON? try parsing and read common fields
+  // JSON? parse and check common fields
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       const data = JSON.parse(trimmed);
       const cand = data?.token || data?.jwt || data?.access_token || data?.Authorization || null;
       if (typeof cand === "string" && cand.includes(".")) return cand;
-      // Some APIs nest it: { data: { token: "" } }
       const deep = data?.data?.token || data?.data?.jwt || data?.data?.access_token;
       if (typeof deep === "string" && deep.includes(".")) return deep;
     } catch { /* ignore */ }
@@ -77,18 +75,24 @@ function tokenFromBodyText(text) {
   return null;
 }
 
+// base64 for potential non-ASCII credentials (RFC 7617 UTF-8)
+function b64utf8(str) {
+  // eslint-disable-next-line no-undef
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
 /* ---------------- Sign-in / out ---------------- */
 
 /**
- * Sign in using Basic auth (username:password OR email:password)
- * Returns the JWT string when successful, or null if cookie-only auth is used.
+ * Sign in using Basic auth (username:password OR email:password).
+ * Returns the JWT string on success.
  */
 export async function signIn(loginId, password) {
   if (!loginId || !password) {
     throw new Error("Please enter both login and password.");
   }
 
-  const basic = btoa(`${loginId}:${password}`);
+  const basic = b64utf8(`${loginId}:${password}`);
 
   const resp = await fetch(R01_AUTH_ENDPOINT, {
     method: "POST",
@@ -96,11 +100,8 @@ export async function signIn(loginId, password) {
       "Authorization": `Basic ${basic}`,
       "Accept": "application/json, text/plain, */*"
     },
-    // Some backends want an explicit empty body
-    body: "",
-    // Include in case the server sets an auth cookie as fallback
-    credentials: "include",
-    mode: "cors"
+    body: "" // explicit empty body (no credentials; avoids CORS + wildcard issue)
+    // NOTE: do NOT set credentials:'include' for cross-origin here
   });
 
   if (!resp.ok) {
@@ -115,10 +116,11 @@ export async function signIn(loginId, password) {
     throw new Error(message);
   }
 
-  // 1) Try response headers
+  // 1) Try headers
   let jwt = tokenFromHeaders(resp);
+
+  // 2) Try body (json or text)
   if (!jwt) {
-    // 2) Try body (json or text)
     const contentType = resp.headers.get("content-type") || "";
     if (contentType.includes("application/json")) {
       try {
@@ -132,19 +134,12 @@ export async function signIn(loginId, password) {
     }
   }
 
-  // If still no JWT but request succeeded, we might be on cookie-based auth.
-  // We'll store nothing and let graphql.js send requests with credentials: 'include'.
-  if (jwt && jwt.includes(".")) {
-    setToken(jwt);
-    return jwt;
+  if (!jwt || !jwt.includes(".")) {
+    throw new Error("Unexpected sign-in response: missing JWT.");
   }
 
-  // If cookie was set, we can proceed without a Bearer token
-  // (graphql.js will handle cookie fallback). Otherwise, error.
-  const maybeCookieAuth = resp.headers.get("set-cookie") || "cookie-maybe";
-  if (maybeCookieAuth) return null;
-
-  throw new Error("Unexpected sign-in response: missing JWT.");
+  setToken(jwt);
+  return jwt;
 }
 
 export function signOut() {
@@ -182,7 +177,6 @@ export function mountAuthUI() {
     setLoading(true);
     try {
       await signIn(loginInput.value.trim(), passInput.value);
-      // Toggle UI on success
       loginSection.classList.add("hidden");
       profileSection.classList.remove("hidden");
       authedNav.classList.remove("hidden");
