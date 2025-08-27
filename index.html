@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reboot01 • My Profile</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- App Shell -->
+  <header class="topbar">
+    <h1>My Reboot01 Profile</h1>
+    <nav id="authedNav" class="hidden">
+      <button id="logoutBtn" class="secondary">Log out</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <!-- Login Card -->
+    <section id="loginSection" class="card">
+      <h2>Sign in</h2>
+      <p class="muted">Use your Reboot01 credentials. Supports <code>username:password</code> or <code>email:password</code>.</p>
+      <form id="loginForm" autocomplete="on">
+        <label>
+          Username or Email
+          <input id="loginId" name="loginId" type="text" required placeholder="username or email" />
+        </label>
+        <label>
+          Password
+          <input id="password" name="password" type="password" required placeholder="••••••••" />
+        </label>
+        <button id="loginBtn" type="submit">Sign in</button>
+        <p id="loginError" class="error hidden" role="alert"></p>
+      </form>
+    </section>
+
+    <!-- Profile -->
+    <section id="profileSection" class="hidden">
+      <div class="grid">
+        <!-- Basic Info -->
+        <article class="card">
+          <h2>Basic Info</h2>
+          <dl class="kv">
+            <div><dt>User ID</dt><dd id="userId">—</dd></div>
+            <div><dt>Login</dt><dd id="userLogin">—</dd></div>
+            <div><dt>Audit Ratio</dt><dd id="auditRatio">—</dd></div>
+            <div><dt>Total XP</dt><dd id="totalXp">—</dd></div>
+          </dl>
+        </article>
+
+        <!-- Custom Info (choose any 3, these cover the requirement) -->
+        <article class="card">
+          <h2>Skills (Top)</h2>
+          <ul id="skillsList" class="list"></ul>
+        </article>
+
+        <article class="card">
+          <h2>Recent Grades</h2>
+          <ul id="gradesList" class="list"></ul>
+        </article>
+      </div>
+
+      <!-- SVG Charts -->
+      <section class="card">
+        <h2>Statistics (SVG)</h2>
+        <div class="charts">
+          <figure>
+            <figcaption>XP over Time</figcaption>
+            <svg id="xpOverTime" viewBox="0 0 640 280" role="img" aria-label="XP over time chart"></svg>
+          </figure>
+          <figure>
+            <figcaption>Pass / Fail Ratio</figcaption>
+            <svg id="passFailRatio" viewBox="0 0 320 320" role="img" aria-label="Pass fail ratio chart"></svg>
+          </figure>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <small>Powered by GraphQL • <code>https://learn.reboot01.com/api/graphql-engine/v1/graphql</code></small>
+  </footer>
+
+  <!-- App scripts -->
+  <script src="./utils.js"></script>
+  <script src="./auth.js"></script>
+  <script src="./graphql.js"></script>
+  <script src="./charts.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
+
