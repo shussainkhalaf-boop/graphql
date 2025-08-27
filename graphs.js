@@ -1,38 +1,124 @@
-// Neon SVG helpers
-function drawLineChart(selector, series, opts){
-  const svg = document.querySelector(selector); svg.innerHTML = "";
-  const W=680,H=280,P={l:46,r:10,t:18,b:34}; svg.setAttribute("viewBox","0 0 "+W+" "+H);
-  const yLabel = (opts && opts.yLabel) || "";
-  if(!series || !series.length){ const t=ns("text"); t.setAttribute("x",12); t.setAttribute("y",22); t.textContent="No data"; svg.appendChild(t); return; }
-  const ys=series.map(d=>d.y); const yMin=0, yMax=Math.max(1, Math.max.apply(null, ys)*1.15);
-  const x=(i)=> P.l + (i/Math.max(1,series.length-1)) * (W-P.l-P.r);
-  const y=(v)=> H-P.b - (v-yMin)/(yMax-yMin) * (H-P.t-P.b);
-  const gA = ns("g"); gA.setAttribute("class","axis");
-  const xl=ns("line"); xl.setAttribute("x1",P.l); xl.setAttribute("x2",W-P.r); xl.setAttribute("y1",H-P.b); xl.setAttribute("y2",H-P.b); gA.appendChild(xl);
-  const yl=ns("line"); yl.setAttribute("x1",P.l); yl.setAttribute("x2",P.l); yl.setAttribute("y1",P.t); yl.setAttribute("y2",H-P.b); gA.appendChild(yl);
-  svg.appendChild(gA);
-  for(let i=0;i<=4;i++){ const v=yMin+i*(yMax-yMin)/4, yy=y(v); const l=ns("line"); l.setAttribute("x1",P.l); l.setAttribute("x2",W-P.r); l.setAttribute("y1",yy); l.setAttribute("y2",yy); l.setAttribute("stroke","#1a2a66"); l.setAttribute("opacity",".55"); svg.appendChild(l); const t=ns("text"); t.setAttribute("x",6); t.setAttribute("y",yy+4); t.textContent=Math.round(v); svg.appendChild(t); }
-  const path = ns("path"); path.setAttribute("d", series.map((p,i)=> (i?"L":"M")+x(i)+","+y(p.y)).join(" ")); path.setAttribute("class","line"); svg.appendChild(path);
-  series.forEach((p,i)=>{ const cx=x(i), cy=y(p.y); const dot=ns("circle"); dot.setAttribute("cx",cx); dot.setAttribute("cy",cy); dot.setAttribute("r","3.2"); dot.setAttribute("class","dot"); svg.appendChild(dot); if(i%Math.ceil(series.length/6)===0 || i===series.length-1){ const tx=ns("text"); tx.setAttribute("x",cx-12); tx.setAttribute("y",H-10); tx.textContent=series[i].x.slice(5); svg.appendChild(tx);} });
-  if(yLabel){ const t=ns("text"); t.setAttribute("x",P.l+6); t.setAttribute("y",P.t+12); t.textContent=yLabel; svg.appendChild(t); }
-  function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
-}
+// graphql.js — robust GraphQL client (JWT + cookie + worker), no design changes
 
-function drawDonut(selector, data){
-  const svg = document.querySelector(selector); svg.innerHTML = "";
-  const W=280,H=280,R=108,C={x:W/2,y:H/2}; svg.setAttribute("viewBox","0 0 "+W+" "+H);
-  const total = data.reduce((s,d)=>s+d.value,0); if(!total){ const t=ns("text"); t.setAttribute("x",96); t.setAttribute("y",140); t.textContent="No results"; svg.appendChild(t); return; }
-  let a0=-Math.PI/2; data.forEach(d=>{ const a1=a0 + (d.value/total)*Math.PI*2; const large=(a1-a0)>Math.PI?1:0; const x0=C.x+R*Math.cos(a0), y0=C.y+R*Math.sin(a0), x1=C.x+R*Math.cos(a1), y1=C.y+R*Math.sin(a1); const p=ns("path"); p.setAttribute("d","M "+x0+" "+y0+" A "+R+" "+R+" 0 "+large+" 1 "+x1+" "+y1+" L "+C.x+" "+C.y+" Z"); p.setAttribute("class", d.cls); svg.appendChild(p); a0=a1; });
-  const hole=ns("circle"); hole.setAttribute("cx",C.x); hole.setAttribute("cy",C.y); hole.setAttribute("r",R*0.62); hole.setAttribute("fill","#0b0f1e"); hole.setAttribute("stroke","#26307a"); svg.appendChild(hole);
-  const label=ns("text"); label.setAttribute("x",C.x-18); label.setAttribute("y",C.y+4); label.textContent=Math.round((data[0].value/total)*100)+"%"; svg.appendChild(label);
-  function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
-}
+(function (global) {
+  // ---- Config
+  global.CONFIG = global.CONFIG || {};
+  const GRAPHQL_URL = global.CONFIG.GRAPHQL_URL || "https://learn.reboot01.com/api/graphql-engine/v1/graphql";
+  const WORKER_BASE  = global.CONFIG.WORKER_BASE  || localStorage.getItem("WORKER_BASE") || "";
 
-function drawBarChart(selector, data){
-  const svg=document.querySelector(selector); svg.innerHTML=""; const W=680,H=300,P={l:54,r:10,t:20,b:46}; svg.setAttribute("viewBox","0 0 "+W+" "+H);
-  if(!data || !data.length){ const t=ns("text"); t.setAttribute("x",12); t.setAttribute("y",22); t.textContent="No data"; svg.appendChild(t); return; }
-  const max=Math.max.apply(null, data.map(d=>d.value))||1;
-  const band=(W-P.l-P.r)/data.length;
-  data.forEach((d,i)=>{ const h=(d.value/max)*(H-P.t-P.b); const x=P.l + i*band; const y=H-P.b-h; const r=ns("rect"); r.setAttribute("x",x+8); r.setAttribute("y",y); r.setAttribute("width",Math.max(8,band-16)); r.setAttribute("height",h); r.setAttribute("fill","#a78bfa"); r.setAttribute("rx","6"); svg.appendChild(r); const tx=ns("text"); tx.setAttribute("x",x+band/2); tx.setAttribute("y",H-12); tx.setAttribute("text-anchor","middle"); tx.textContent=d.label; svg.appendChild(tx); });
-  function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
-}
+  // ---- JWT helpers
+  const b64u = s => s.replace(/-/g, "+").replace(/_/g, "/");
+  function isJwt(tok){ if(!tok || typeof tok!=="string") return false; const p=tok.split("."); if(p.length!==3) return false; try{atob(b64u(p[0]));atob(b64u(p[1]));return true;}catch{return false;} }
+  function extractJwt(str){ const m=String(str||"").match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/); return m?m[0]:""; }
+  function getToken(){
+    const srcs = [
+      localStorage.getItem("JWT"), localStorage.getItem("jwt"), localStorage.getItem("token"), localStorage.getItem("authToken"),
+      sessionStorage.getItem("JWT"), sessionStorage.getItem("jwt"), sessionStorage.getItem("token"), sessionStorage.getItem("authToken"),
+      document.cookie || ""
+    ].filter(Boolean);
+    for (const s of srcs) { const j = extractJwt(s); if (isJwt(j)) return j; }
+    return "";
+  }
+  function saveTokenFrom(raw){
+    const j = extractJwt(raw);
+    if (!isJwt(j)) throw new Error("Invalid JWT");
+    localStorage.setItem("JWT", j);
+    return j;
+  }
+  function clearToken(){ ["JWT","jwt","token","authToken"].forEach(k=>{localStorage.removeItem(k);sessionStorage.removeItem(k);}); }
+
+  // ---- HTTP helpers
+  async function httpJson(url, options = {}) {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let data = null; try { data = text ? JSON.parse(text) : {}; } catch {}
+    if (!res.ok) {
+      const msg = (data && (data.error || data.message)) || text || `HTTP ${res.status}`;
+      const err = new Error(msg); err.status = res.status; err.body = text; throw err;
+    }
+    return { res, data, text };
+  }
+
+  // ---- GraphQL with fallbacks: Bearer -> Cookie -> Worker
+  async function gql(query, variables = {}) {
+    const token = getToken();
+
+    // 1) Bearer JWT
+    if (token) {
+      try {
+        const { data } = await httpJson(GRAPHQL_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json", "authorization": `Bearer ${token}` },
+          body: JSON.stringify({ query, variables })
+        });
+        if (data.errors) throw new Error(data.errors.map(e=>e.message).join("; "));
+        return data.data || data;
+      } catch (e) {
+        // fall through to cookie/worker if auth error
+        if (String(e.message).toLowerCase().includes("jwt") || e.status===401) {
+          // continue to next strategy
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    // 2) Cookie session (same-site). Works only if your page is served from the same domain.
+    try {
+      const { data } = await httpJson(GRAPHQL_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",             // send cookies if available
+        body: JSON.stringify({ query, variables })
+      });
+      if (data.errors) throw new Error(data.errors.map(e=>e.message).join("; "));
+      return data.data || data;
+    } catch (e) {
+      // continue to worker if configured
+      if (!WORKER_BASE) { if (!token) throw new Error("No valid JWT and no cookie session. Set a JWT or configure WORKER_BASE."); }
+    }
+
+    // 3) Worker proxy (if set)
+    if (WORKER_BASE) {
+      const url = WORKER_BASE.replace(/\/$/,"") + "/graphql";
+      const headers = { "content-type": "application/json" };
+      if (token) headers.authorization = `Bearer ${token}`;
+      const { data } = await httpJson(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query, variables })
+      });
+      if (data.errors) throw new Error(data.errors.map(e=>e.message).join("; "));
+      return data.data || data;
+    }
+
+    throw new Error("All auth strategies failed (JWT, cookie, worker).");
+  }
+
+  // ---- Expose
+  global.GraphQL = {
+    GRAPHQL_URL, WORKER_BASE,
+    getToken, saveTokenFrom, clearToken,
+    gql,
+    // Queries
+    Q: {
+      USER: `query{ user{ id login auditRatio } }`,
+      TX_PRIMARY: `query{
+        transaction(where:{type:{_eq:"xp"}}, order_by:{createdAt:asc}){
+          amount createdAt path type
+        }
+      }`,
+      TX_ALT: `query{
+        transactions(where:{type:{_eq:"xp"}}, order_by:{createdAt:asc}){
+          amount createdAt path type
+        }
+      }`,
+      TX_NOFILTER_PRIMARY: `query{
+        transaction(order_by:{createdAt:asc}){ amount createdAt path type }
+      }`,
+      TX_NOFILTER_ALT: `query{
+        transactions(order_by:{createdAt:asc}){ amount createdAt path type }
+      }`,
+    }
+  };
+})(window);
