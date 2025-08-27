@@ -1,37 +1,51 @@
 // graphql.js
-// Tiny GraphQL client + a handful of focused queries for the project.
+// Tiny GraphQL client + focused queries for the Reboot01 profile project.
 
 import { getToken } from "./auth.js";
 
 export const GRAPHQL_ENDPOINT = "https://learn.reboot01.com/api/graphql-engine/v1/graphql";
 
-/** Core fetcher */
+/**
+ * Core GraphQL fetcher.
+ * - Sends Authorization: Bearer <JWT> if we have it
+ * - Always sends credentials for cookie-based sessions
+ */
 export async function gql(request, variables = {}) {
   const token = getToken();
-  if (!token) throw new Error("Not authenticated.");
+
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const resp = await fetch(GRAPHQL_ENDPOINT, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify({ query: request, variables }),
+    credentials: "include", // allow cookie-based auth fallback
+    mode: "cors",
   });
 
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(json?.errors?.[0]?.message || `GraphQL HTTP ${resp.status}`);
+  // Try to parse JSON either way
+  let json = {};
+  try {
+    json = await resp.json();
+  } catch {
+    // If non-JSON response, surface a readable error
+    const text = await resp.text().catch(() => "");
+    throw new Error(text || `GraphQL HTTP ${resp.status}`);
   }
-  if (json.errors && json.errors.length) {
-    // Surface the first error to keep things simple
+
+  if (!resp.ok) {
+    const firstErr = json?.errors?.[0]?.message;
+    throw new Error(firstErr || `GraphQL HTTP ${resp.status}`);
+  }
+  if (json.errors?.length) {
     throw new Error(json.errors[0].message || "GraphQL error");
   }
   return json.data;
 }
 
 /* ===========================
-   Queries we’ll use in app.js
+   Queries used by the app UI
    =========================== */
 
 /** 1) Basic user info (normal query) */
@@ -45,19 +59,13 @@ export async function fetchUserBasic() {
     }
   `;
   const data = await gql(q);
-  // API returns an array; we take the first (current user)
   const me = Array.isArray(data?.user) ? data.user[0] : null;
   return me || { id: null, login: null };
 }
 
-/** 2) Try to fetch audit ratio from user (field name can differ by schema version).
- *    We attempt a few likely names; if all fail we return null gracefully. */
+/** 2) Audit ratio (field name can vary across schemas) */
 export async function fetchUserAuditRatio() {
-  const candidates = [
-    "auditRatio",
-    "audit_ratio",
-    "auditratio",
-  ];
+  const candidates = ["auditRatio", "audit_ratio", "auditratio"];
   for (const field of candidates) {
     try {
       const q = `
@@ -67,28 +75,30 @@ export async function fetchUserAuditRatio() {
       `;
       const data = await gql(q);
       const me = data?.user?.[0];
-      if (me && field in me && typeof me[field] !== "undefined") {
-        return Number(me[field]);
+      if (me && Object.prototype.hasOwnProperty.call(me, field)) {
+        const v = me[field];
+        if (v == null) return null;
+        const num = Number(v);
+        return Number.isFinite(num) ? num : null;
       }
     } catch {
-      // try next field name
+      // try next candidate
     }
   }
   return null;
 }
 
-/** 3) Transactions of type 'xp' (for XP over time / by project, etc.) */
+/** 3) Transactions of type 'xp' (for XP over time / by project) */
 export async function fetchXpTransactions({ limit = 200, sinceISO = null } = {}) {
-  // Filter by type 'xp' and optionally by createdAt >= sinceISO
-  // Adjust where clause depending on API capabilities. Hasura-style shown here.
+  // Hasura-style filtering; createdAt type is typically timestamptz
+  const whereCreated = sinceISO ? `createdAt: { _gte: $since }` : ``;
+
   const q = /* GraphQL */ `
     query XpTx($limit: Int!, $since: timestamptz) {
       transaction(
         where: {
           type: { _eq: "xp" }
-          ${/* when since provided, filter */""}
-          ${/* createdAt may be timestamptz or text; schema uses T format in examples */""}
-          ${sinceISO ? `createdAt: { _gte: $since }` : ``}
+          ${whereCreated}
         }
         order_by: { createdAt: asc }
         limit: $limit
@@ -125,7 +135,7 @@ export async function fetchRecentProgress({ limit = 50 } = {}) {
   return data?.progress ?? [];
 }
 
-/** 5) Recent results (alternate source of grades/progression) with nested user (nested query) */
+/** 5) Recent results with nested user (nested query example) */
 export async function fetchRecentResults({ limit = 50 } = {}) {
   const q = /* GraphQL */ `
     query RecentResults($limit: Int!) {
@@ -137,7 +147,7 @@ export async function fetchRecentResults({ limit = 50 } = {}) {
         type
         createdAt
         path
-        user {           # nested usage example
+        user {        # nested usage
           id
           login
         }
@@ -160,14 +170,14 @@ export async function fetchObjectById(id) {
       }
     }
   `;
-  const data = await gql(q, { id });
+  const data = await gql(q, { id: Number(id) });
   return Array.isArray(data?.object) ? data.object[0] : null;
 }
 
-/** 7) Batch object lookup (small batching to cut round-trips) */
+/** 7) Batch object lookup (cuts round-trips) */
 export async function fetchObjectsByIds(ids = []) {
   if (!ids.length) return [];
-  const unique = [...new Set(ids.filter((v) => Number.isFinite(Number(v))))];
+  const unique = [...new Set(ids.map(Number).filter(Number.isFinite))];
   const q = /* GraphQL */ `
     query Objs($ids: [Int!]) {
       object(where: { id: { _in: $ids }}) {
