@@ -1,188 +1,148 @@
-// app.js — renders numbers + charts using GraphQL.gql (no design changes)
+// same as previous neon version JS (no image refs), kept for brevity
+// Neon version JS (ASCII only)
+const { SIGNIN_URL, GRAPHQL_URL } = window.__CONFIG__;
 
-(function () {
-  const $ = (id) => document.getElementById(id);
-  const setStatus = (msg, isError = false) => {
-    const el = $("signinStatus");
-    if (el) { el.textContent = msg || ""; el.style.color = isError ? "#ff9aa5" : ""; }
-    else console.log("[status]", msg);
-  };
+const el = (id) => document.getElementById(id);
+const $login = el("screen-login");
+const $app = el("screen-app");
+const $err = el("login-error");
+const $btnLogout = el("btn-logout");
+const TOKEN_KEY = "reboot01.jwt";
 
-  function formatNumber(n) { return new Intl.NumberFormat().format(Math.round(n || 0)); }
-  const dayKey = (iso) => new Date(iso).toISOString().slice(0, 10);
-  function extractProjectName(path) {
-    if (!path || typeof path !== "string") return "Unknown";
-    const parts = path.split("/").filter(Boolean);
-    let last = parts[parts.length - 1] || "Unknown";
-    if (/^(ex|exercise)?\d+$/i.test(last)) last = parts[parts.length - 2] || last;
-    return last;
-  }
+function setScreen(authed) {
+  if (authed) { $login.classList.add("hidden"); $app.classList.remove("hidden"); }
+  else { $app.classList.add("hidden"); $login.classList.remove("hidden"); }
+}
+function b64urlDecode(input){ input=input.replace(/-/g,"+").replace(/_/g,"/"); const pad=input.length%4; if(pad) input+="=".repeat(4-pad); return atob(input); }
+function parseJwt(token){ try{ return JSON.parse(b64urlDecode(token.split(".")[1])); }catch{return null;} }
 
-  // SVG fallbacks if graphs.js is not present (no design changes)
-  function clearSvg(svg) { while (svg && svg.firstChild) svg.removeChild(svg.firstChild); }
-  function mk(tag, attrs = {}, parent = null) {
-    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
-    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
-    if (parent) parent.appendChild(el);
-    return el;
-  }
-  function scale(v, d0, d1, r0, r1) { if (d1 === d0) return (r0 + r1) / 2; return r0 + ((v - d0) / (d1 - d0)) * (r1 - r0); }
-  function axes(svg, pad) {
-    const g = mk("g", { stroke: "#2b3f5b", "stroke-width": "1", fill: "none" }, svg);
-    mk("line", { x1: pad, y1: 200 - pad, x2: 600 - pad, y2: 200 - pad }, g);
-    mk("line", { x1: pad, y1: 20, x2: pad, y2: 200 - pad }, g);
-  }
-  function drawAreaFallback(svg, points) {
-    clearSvg(svg); if (!svg || !points?.length) return;
-    const pad = 36, xs = points.map(p => p.x), ys = points.map(p => p.y);
-    const xMin = Math.min(...xs), xMax = Math.max(...xs), yMax = Math.max(10, Math.max(...ys));
-    axes(svg, pad);
-    const path = mk("path", { fill: "#173c6a", stroke: "#2c7be5", "stroke-width": "1.5", "fill-opacity": "0.4" }, svg);
-    let d = "";
-    points.forEach((p, i) => {
-      const px = scale(p.x, xMin, xMax, pad, 600 - pad);
-      const py = scale(p.y, 0, yMax, 200 - pad, 20);
-      d += i ? ` L ${px} ${py}` : `M ${px} ${py}`;
-    });
-    const lastX = scale(points[points.length - 1].x, xMin, xMax, pad, 600 - pad);
-    const firstX = scale(points[0].x, xMin, xMax, pad, 600 - pad);
-    const baseY = 200 - pad;
-    d += ` L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
-    path.setAttribute("d", d);
-  }
-  function drawBarsFallback(svg, items) {
-    clearSvg(svg); if (!svg || !items?.length) return;
-    const pad = 36, w = 600 - pad * 2, h = 200 - pad * 2;
-    const max = Math.max(10, Math.max(...items.map(i => i.value)));
-    const gap = 8, bw = Math.max(8, (w - gap * (items.length - 1)) / items.length);
-    axes(svg, pad);
-    const g = mk("g", {}, svg);
-    items.forEach((it, i) => {
-      const x = pad + i * (bw + gap);
-      const colH = (it.value / max) * h;
-      const y = pad + (h - colH);
-      const r = mk("rect", { x, y, width: bw, height: colH, fill: "#2c7be5", rx: 4 }, g);
-      mk("title", {}, r).textContent = `${it.label}: ${it.value}`;
-    });
-  }
-
-  // Prefer graphs.js if loaded
-  const drawArea = typeof window.drawAreaChart === "function" ? window.drawAreaChart : drawAreaFallback;
-  const drawBars = typeof window.drawBarChart === "function" ? window.drawBarChart : drawBarsFallback;
-
-  async function fetchUser() {
-    const d = await window.GraphQL.gql(window.GraphQL.Q.USER);
-    const u = Array.isArray(d.user) ? d.user[0] : d.user;
-    if (!u) throw new Error("No user returned.");
-    return u;
-  }
-
-  async function fetchXP() {
-    const Q = window.GraphQL.Q;
-    // Try primary
-    try { const d = await window.GraphQL.gql(Q.TX_PRIMARY); if (d.transaction) return d.transaction; } catch {}
-    // Alternate
-    try { const d = await window.GraphQL.gql(Q.TX_ALT); if (d.transactions) return d.transactions; } catch {}
-    // No filter primary
-    try { const d = await window.GraphQL.gql(Q.TX_NOFILTER_PRIMARY); if (d.transaction) return (d.transaction || []).filter(t => !t.type || t.type === "xp"); } catch {}
-    // No filter alt
-    try { const d = await window.GraphQL.gql(Q.TX_NOFILTER_ALT); if (d.transactions) return (d.transactions || []).filter(t => !t.type || t.type === "xp"); } catch {}
-    throw new Error("XP query failed (schema mismatch).");
-  }
-
-  function render(user, tx) {
-    const xpSvg = $("xpChart"), prjSvg = $("projectsChart");
-    if (!xpSvg || !prjSvg) { setStatus("Missing #xpChart and/or #projectsChart in HTML.", true); return; }
-
-    if ($("userLogin"))  $("userLogin").textContent  = user?.login ?? "—";
-    if ($("userId"))     $("userId").textContent     = user?.id ?? "—";
-    if ($("auditRatio")) $("auditRatio").textContent = (user?.auditRatio != null ? Number(user.auditRatio).toFixed(2) : "—");
-
-    const totalXp = (tx || []).reduce((s, t) => s + (t.amount || 0), 0);
-    if ($("totalXp")) $("totalXp").textContent = formatNumber(totalXp);
-
-    const perDay = {};
-    for (const t of (tx || [])) {
-      if (!t.createdAt) continue;
-      const k = dayKey(t.createdAt);
-      perDay[k] = (perDay[k] || 0) + (t.amount || 0);
-    }
-    const points = Object.entries(perDay).sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, v], i) => ({ x: i, y: v }));
-    drawArea(xpSvg, points);
-
-    const bag = {};
-    for (const t of (tx || [])) {
-      const name = extractProjectName(t.path);
-      bag[name] = (bag[name] || 0) + (t.amount || 0);
-    }
-    if ($("projectsCount")) $("projectsCount").textContent = String(Object.keys(bag).length || 0);
-    const top10 = Object.entries(bag).map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value).slice(0, 10);
-    drawBars(prjSvg, top10);
-
-    const listEl = $("projectsList");
-    if (listEl) {
-      listEl.innerHTML = "";
-      top10.forEach(it => {
-        const div = document.createElement("div");
-        div.className = "item";
-        div.innerHTML = `<div class="left"><span class="tag">${it.label}</span></div><div>${formatNumber(it.value)} XP</div>`;
-        listEl.appendChild(div);
-      });
-    }
-  }
-
-  async function boot() {
-    try {
-      setStatus("Loading...");
-      const user = await fetchUser(); // validates token too
-      const tx = await fetchXP();
-      render(user, tx);
-      setStatus("Done.");
-    } catch (e) {
-      setStatus(e.message || String(e), true);
-    }
-  }
-
-  async function handleSignin(e) {
-    e.preventDefault();
-    const login = $("login")?.value?.trim();
-    const password = $("password")?.value || "";
-    try {
-      setStatus("Signing in...");
-      // If WORKER_BASE is configured, use worker; otherwise treat password as raw JWT
-      if (window.GraphQL.WORKER_BASE) {
-        await window.GraphQL.workerSignin(login, password);
-      } else {
-        window.GraphQL.saveTokenFrom(password);
-      }
-      setStatus("Signed in. Loading...");
-      await boot();
-    } catch (err) {
-      setStatus("Sign-in failed: " + err.message, true);
-    }
-  }
-
-  function wire() {
-    const form = $("signinForm");
-    if (form) form.addEventListener("submit", handleSignin);
-    const lb = $("logoutBtn");
-    if (lb) lb.addEventListener("click", () => {
-      window.GraphQL.clearToken();
-      setStatus("Logged out.");
-      ["userLogin","userId","totalXp","auditRatio","projectsCount"].forEach(id => { if ($(id)) $(id).textContent = "—"; });
-      const xc = $("xpChart"), pc = $("projectsChart");
-      if (xc) clearSvg(xc);
-      if (pc) clearSvg(pc);
-    });
-  }
-
-  document.addEventListener("DOMContentLoaded", () => {
-    wire();
-    const token = window.GraphQL.getToken();
-    if (token) boot();
-    else setStatus(window.GraphQL.WORKER_BASE
-      ? "Missing/invalid JWT. Use the sign-in form."
-      : "Missing/invalid JWT. Paste your JWT in the password field and press Sign in.", true);
+async function signin(identity, password) {
+  const basic = btoa(identity + ":" + password);
+  const res = await fetch(SIGNIN_URL, { method: "POST", headers: { authorization: "Basic " + basic } });
+  if (!res.ok) { const text = await res.text(); throw new Error(text || "Signin failed (" + res.status + ")"); }
+  return await res.text();
+}
+async function gql(query, variables={}){
+  const token = localStorage.getItem(TOKEN_KEY);
+  const res = await fetch(GRAPHQL_URL, {
+    method: "POST",
+    headers: { "content-type":"application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ query, variables })
   });
+  const data = await res.json();
+  if (data.errors) throw new Error(data.errors.map(e=>e.message).join("; "));
+  return data.data;
+}
+
+// Queries
+const Q_USER = "{ user { id login firstName lastName } }";
+const Q_XP = `query XP($uid:Int!,$limit:Int!){ transaction(where:{userId:{_eq:$uid}, type:{_eq:"xp"}}, order_by:{createdAt:asc}, limit:$limit){ amount createdAt objectId path } }`;
+const Q_RESULTS = "{ result(order_by:{createdAt:desc}, limit:200){ id grade type createdAt objectId user{ id login } } }";
+const Q_PROGRESS = "query P($limit:Int!){ progress(order_by:{createdAt:desc}, limit:$limit){ objectId grade createdAt path userId } }";
+const Q_OBJECTS = "query O($ids:[Int!]){ object(where:{ id:{ _in:$ids } }){ id type name } }";
+
+function fmtDate(s){ return new Date(s).toLocaleString(); }
+
+async function loadAll(){
+  const u = await gql(Q_USER);
+  const user = (u && u.user && u.user[0]) || null;
+  if(!user) throw new Error("Cannot read user");
+  el("u-id").textContent = user.id; el("u-login").textContent = user.login;
+  el("u-first").textContent = user.firstName || "-"; el("u-last").textContent = user.lastName || "-";
+  el("hero-name").textContent = user.login + " • Profile";
+
+  const xpData = await gql(Q_XP, { uid: user.id, limit: 900 });
+  const xp = xpData.transaction || [];
+  const total = xp.reduce((s,x)=> s + (x.amount||0), 0);
+  el("xp-total").textContent = total.toLocaleString();
+
+  // series
+  const byDay = {};
+  xp.forEach(x=>{ const d=new Date(x.createdAt).toISOString().slice(0,10); byDay[d]=(byDay[d]||0)+x.amount; });
+  const series = Object.entries(byDay).sort((a,b)=> a[0].localeCompare(b[0]))
+                 .map(([date,value])=>({x:date,y:value}));
+  drawLineChart("#svg-xp", series, { yLabel: "XP" });
+
+  // results
+  const r = await gql(Q_RESULTS);
+  const results = r.result || [];
+  const passed = results.filter(x=>x.grade===1).length;
+  const failed = results.filter(x=>x.grade===0).length;
+  el("passed-count").textContent = passed; el("failed-count").textContent = failed;
+  el("audit-ratio").textContent = passed+failed>0 ? (passed/(passed+failed)).toFixed(2) : "-";
+  drawDonut("#svg-ratio", [
+    {label:"PASS", value:passed, cls:"slice-pass"},
+    {label:"FAIL", value:failed, cls:"slice-fail"}
+  ]);
+
+  // progress + objects (project cards + bar chart)
+  const pr = await gql(Q_PROGRESS, { limit: 24 });
+  const items = pr.progress || [];
+  const projBox = document.getElementById("projects"); projBox.innerHTML = "";
+  const ids = Array.from(new Set(items.map(it=>it.objectId))).slice(0,120);
+  let objMap = {};
+  if (ids.length) {
+    const objs = await gql(Q_OBJECTS, { ids });
+    (objs.object || []).forEach(o => objMap[o.id] = o);
+  }
+  // Bar chart
+  const typeCount = {};
+  items.forEach(it=>{ const t=(objMap[it.objectId] && objMap[it.objectId].type) || "unknown"; typeCount[t]=(typeCount[t]||0)+1; });
+  const typeData = Object.entries(typeCount).map(([label,value])=>({label,value}));
+  drawBarChart("#svg-type", typeData);
+
+  // project cards
+  items.slice(0,12).forEach(it=>{
+    const o = objMap[it.objectId];
+    const div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML =
+      '<div class="title">' + (o ? o.name : "Object " + it.objectId) + '</div>' +
+      '<div class="meta">id: ' + it.objectId + ' — type: ' + ((o && o.type) || "n/a") + "</div>" +
+      '<div class="meta">grade: ' + it.grade + "</div>" +
+      '<div class="meta">' + (it.path||"") + "</div>" +
+      '<div class="meta">' + fmtDate(it.createdAt) + "</div>";
+    projBox.appendChild(div);
+  });
+}
+
+document.getElementById("login-form").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  $err.classList.add("hidden");
+  const identity = document.getElementById("identity").value.trim();
+  const password = document.getElementById("password").value;
+  const remember = document.getElementById("remember").checked;
+  const btn = document.getElementById("btn-login");
+  btn.disabled = true; btn.textContent = "Signing in...";
+  try{
+    const jwt = await signin(identity, password);
+    if (remember) localStorage.setItem(TOKEN_KEY, jwt);
+    else sessionStorage.setItem(TOKEN_KEY, jwt);
+    localStorage.setItem(TOKEN_KEY, jwt);
+    setScreen(true);
+    await loadAll();
+  }catch(err){
+    $err.textContent = (""+err.message).slice(0,300);
+    $err.classList.remove("hidden");
+  }finally{
+    btn.disabled = false; btn.textContent = "Get JWT";
+  }
+});
+
+$btnLogout.addEventListener("click", ()=>{
+  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  setScreen(false);
+  ["u-id","u-login","u-first","u-last","xp-total","audit-ratio","passed-count","failed-count"]
+    .forEach(id => (document.getElementById(id).textContent = "-"));
+  document.querySelector("#svg-xp").innerHTML = "";
+  document.querySelector("#svg-ratio").innerHTML = "";
+  document.querySelector("#svg-type").innerHTML = "";
+  document.querySelector("#projects").innerHTML = "";
+});
+
+(function init(){
+  const jwt = localStorage.getItem(TOKEN_KEY);
+  if (jwt && parseJwt(jwt)) { setScreen(true); loadAll().catch(err=>{ console.error(err); localStorage.removeItem(TOKEN_KEY); setScreen(false); }); }
+  else setScreen(false);
 })();
