@@ -1,165 +1,58 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GraphQL Profile</title>
-  <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./style.css?v=4" />
-</head>
-<body>
-  <div class="bg">
-    <div class="orb orb1"></div>
-    <div class="orb orb2"></div>
-    <div class="gridlines"></div>
-  </div>
+/* Neon theme + inline SVG logo; wide layout; no footer text */
+*{box-sizing:border-box}
+:root{
+  --bg0:#05060b; --bg1:#0b0f1a; --card:rgba(17,23,41,.55);
+  --border:rgba(140,160,255,.25); --text:#e6e8ff; --muted:#a9b0d6;
+  --neon1:#7c3aed; --neon2:#06b6d4; --fail:#ef4444; --pass:#22c55e;
+}
+html,body{height:100%}
+body{
+  margin:0;font:15px/1.6 Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;color:var(--text);
+  background:radial-gradient(1200px 600px at 10% -10%,#101530 0%,#060812 50%),linear-gradient(180deg,var(--bg1),var(--bg0))
+}
+.bg{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+.orb{position:absolute;filter:blur(40px);opacity:.25;border-radius:50%}
+.orb1{width:420px;height:420px;left:-60px;top:-80px;background:radial-gradient(circle,var(--neon1),transparent)}
+.orb2{width:520px;height:520px;right:-120px;bottom:-120px;background:radial-gradient(circle,var(--neon2),transparent)}
+.gridlines{position:absolute;inset:-20%;background:radial-gradient(circle at 50% 50%,transparent 50%,rgba(255,255,255,.05) 51%) 0 0/40px 40px;mask:linear-gradient(transparent,rgba(0,0,0,.8) 25%,rgba(0,0,0,.95))}
+.glass{backdrop-filter:saturate(160%) blur(8px)}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(6,8,18,.65)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.3px}
+.logo-svg{width:48px;height:48px}
+.logo-svg.lg{width:128px;height:128px}
+.wordmark{font-size:16px;color:#eaeaff}
+.chip{background:linear-gradient(90deg,var(--neon2),var(--neon1));color:#08111a;padding:8px 14px;border-radius:999px;text-decoration:none;font-weight:800;border:1px solid rgba(255,255,255,.2)}
+.screen{max-width:1440px;margin:0 auto;padding:16px 12px}
+.center{display:grid;place-items:center}
+.hidden{display:none !important}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.card-title{margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.hero{display:flex;align-items:center;gap:14px;margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:16px}
+.grid{display:grid;gap:12px}
+.grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:1000px){.grid.three,.grid.two{grid-template-columns:1fr}}
+.card-login{max-width:480px;margin:8vh auto 0;text-align:center}
+.field{display:flex;flex-direction:column;text-align:left;margin:10px 0}
+.field input{background:#0b1020;border:1px solid #1b244a;border-radius:12px;padding:10px 12px;color:#e6e8ff;outline:none}
+.field input:focus{border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,.25)}
+.checkbox{display:flex;align-items:center;gap:8px;justify-content:center;margin:8px 0}
+.btn{background:linear-gradient(90deg,var(--neon1),var(--neon2));color:#071018;border:none;border-radius:12px;padding:10px 16px;font-weight:800;cursor:pointer}
+.error{color:#ffb4b4}.muted{color:var(--muted)}.tiny{font-size:12px}
+.kv{display:flex;flex-direction:column;gap:8px}.k{display:inline-block;min-width:120px;color:#a9b0d6}.v{font-weight:800}
+.projects{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.projects .item{border:1px solid var(--border);border-radius:12px;padding:10px;background:rgba(10,14,28,.55)}
+.projects .title{font-weight:800}.projects .meta{color:#a9b0d6;font-size:12px}
+.chart{border:1px dashed rgba(140,160,255,.25);background:rgba(6,10,24,.55);border-radius:12px;padding:8px}
+svg text{fill:#b8c0ff;font-size:11px}.axis path,.axis line{stroke:#202a57}
+.line{fill:none;stroke:#60a5fa;stroke-width:2.75;filter:drop-shadow(0 0 6px rgba(96,165,250,.35))}
+.dot{stroke:#080a16;stroke-width:1.6;fill:#60a5fa}
+.slice-pass{fill:var(--pass)}.slice-fail{fill:var(--fail)}
+.ic{display:inline-block;width:14px;height:14px;border-radius:3px;background:linear-gradient(180deg,#06b6d4,#7c3aed);box-shadow:0 0 10px rgba(124,58,237,.5)}
+.ic-user{mask:radial-gradient(circle at 50% 40%,#000 34%,transparent 35%),radial-gradient(circle at 50% 100%,#000 50%,transparent 51%)}
+.ic-stats{mask:linear-gradient(#000 0 0) left/20% 60% no-repeat,linear-gradient(#000 0 0) center/20% 80% no-repeat,linear-gradient(#000 0 0) right/20% 40% no-repeat}
+.ic-rocket{mask:radial-gradient(circle at 50% 0,#000 60%,transparent 61%),linear-gradient(#000 0 0) bottom/30% 30% no-repeat}
+.ic-line{mask:linear-gradient(120deg,transparent 45%,#000 46% 54%,transparent 55%)}
+.ic-donut{mask:radial-gradient(circle,#000 52%,transparent 53%)}
+.ic-bars{mask:linear-gradient(#000 0 0) left/20% 60% no-repeat,linear-gradient(#000 0 0) center/20% 30% no-repeat,linear-gradient(#000 0 0) right/20% 80% no-repeat}
 
-  <header class="topbar glass">
-    <div class="brand">
-      <!-- Inline SVG Logo -->
-      <svg class="logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
-        <defs>
-          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#7c3aed"/>
-            <stop offset="100%" stop-color="#06b6d4"/>
-          </linearGradient>
-          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
-            <feMerge>
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        <circle cx="60" cy="60" r="52" fill="url(#grad)" stroke="#ffffff33" stroke-width="6" filter="url(#glow)"/>
-        <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
-      </svg>
-      <span class="wordmark">GraphQL Profile</span>
-    </div>
-    <nav class="nav">
-      <a href="#" id="btn-logout" class="chip">Logout</a>
-    </nav>
-  </header>
-
-  <!-- LOGIN -->
-  <main id="screen-login" class="screen center">
-    <section class="card card-login glass">
-      <div class="login-head">
-        <!-- Same SVG logo reused -->
-        <div class="logo-wrap">
-          <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
-            <defs>
-              <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#7c3aed"/>
-                <stop offset="100%" stop-color="#06b6d4"/>
-              </linearGradient>
-            </defs>
-            <circle cx="60" cy="60" r="52" fill="url(#grad2)" stroke="#ffffff33" stroke-width="6"/>
-            <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
-          </svg>
-        </div>
-        <h1>Welcome back</h1>
-        <p class="muted">Sign in to fetch your data from GraphQL.</p>
-      </div>
-      <form id="login-form" autocomplete="on">
-        <label class="field">
-          <span>Username or Email</span>
-          <input id="identity" name="identity" type="text" required />
-        </label>
-        <label class="field">
-          <span>Password</span>
-          <input id="password" name="password" type="password" required />
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="remember" checked />
-          <span>Remember me</span>
-        </label>
-        <button type="submit" id="btn-login" class="btn">Get JWT</button>
-        <p id="login-error" class="error hidden"></p>
-      </form>
-    </section>
-  </main>
-
-  <!-- APP -->
-  <main id="screen-app" class="screen">
-    <section class="hero glass">
-      <div class="logo-wrap">
-        <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
-          <defs>
-            <linearGradient id="grad3" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#7c3aed"/>
-              <stop offset="100%" stop-color="#06b6d4"/>
-            </linearGradient>
-          </defs>
-          <circle cx="60" cy="60" r="52" fill="url(#grad3)" stroke="#ffffff33" stroke-width="6"/>
-          <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
-        </svg>
-      </div>
-      <div class="hero-text">
-        <h2 id="hero-name">Your profile</h2>
-        <p class="muted">Track your XP, results and projects in style.</p>
-      </div>
-    </section>
-
-    <section class="grid three">
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-user"></span> Basics</h3>
-        <div class="kv">
-          <div><span class="k">ID</span><span id="u-id" class="v">-</span></div>
-          <div><span class="k">Login</span><span id="u-login" class="v">-</span></div>
-          <div><span class="k">First</span><span id="u-first" class="v">-</span></div>
-          <div><span class="k">Last</span><span id="u-last" class="v">-</span></div>
-        </div>
-      </section>
-
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-stats"></span> Quick stats</h3>
-        <div class="kv">
-          <div><span class="k">Total XP</span><span id="xp-total" class="v">-</span></div>
-          <div><span class="k">Audit ratio</span><span id="audit-ratio" class="v">-</span></div>
-          <div><span class="k">Passed</span><span id="passed-count" class="v">-</span></div>
-          <div><span class="k">Failed</span><span id="failed-count" class="v">-</span></div>
-        </div>
-      </section>
-
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-rocket"></span> Recent projects</h3>
-        <div id="projects" class="projects"></div>
-      </section>
-    </section>
-
-    <section class="grid two">
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-line"></span> XP over time</h3>
-        <div class="chart">
-          <svg id="svg-xp" viewBox="0 0 680 280"></svg>
-        </div>
-      </section>
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-donut"></span> Pass vs Fail</h3>
-        <div class="chart center">
-          <svg id="svg-ratio" viewBox="0 0 280 280"></svg>
-        </div>
-      </section>
-    </section>
-
-    <section class="card glass">
-      <h3 class="card-title"><span class="ic ic-bars"></span> XP by project type</h3>
-      <div class="chart">
-        <svg id="svg-type" viewBox="0 0 680 300"></svg>
-      </div>
-    </section>
-  </main>
-
-  <footer class="foot glass"></footer>
-
-  <script>
-    window.__CONFIG__ = {
-      SIGNIN_URL: "https://learn.reboot01.com/api/auth/signin",
-      GRAPHQL_URL: "https://learn.reboot01.com/api/graphql-engine/v1/graphql"
-    };
-  </script>
-  <script src="./graphs.js?v=4"></script>
-  <script src="./app.js?v=4"></script>
-</body>
-</html>
