@@ -23,8 +23,7 @@ export function isAuthed() {
   if (!t) return false;
   try {
     const { exp } = parseJwt(t);
-    if (!exp) return true; // if no exp, assume valid
-    // exp is in seconds since epoch
+    if (!exp) return true;
     return Date.now() < exp * 1000;
   } catch {
     return false;
@@ -43,62 +42,109 @@ export function parseJwt(token) {
   return JSON.parse(json);
 }
 
+/* -------------- helpers: extract token -------------- */
+function tokenFromHeaders(resp) {
+  // Common places: Authorization: Bearer <jwt>, or custom X-* headers
+  const auth = resp.headers.get("authorization") || resp.headers.get("Authorization");
+  if (auth && /^bearer\s+/i.test(auth)) return auth.replace(/^bearer\s+/i, "").trim();
+
+  const headerKeys = ["x-access-token", "x-token", "x-jwt", "jwt", "token", "access_token"];
+  for (const k of headerKeys) {
+    const v = resp.headers.get(k);
+    if (v && v.includes(".")) return v.trim();
+  }
+  return null;
+}
+
+function tokenFromBodyText(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+
+  // Looks like a raw JWT?
+  if (trimmed.split(".").length === 3) return trimmed;
+
+  // Looks like JSON? try parsing and read common fields
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const data = JSON.parse(trimmed);
+      const cand = data?.token || data?.jwt || data?.access_token || data?.Authorization || null;
+      if (typeof cand === "string" && cand.includes(".")) return cand;
+      // Some APIs nest it: { data: { token: "" } }
+      const deep = data?.data?.token || data?.data?.jwt || data?.data?.access_token;
+      if (typeof deep === "string" && deep.includes(".")) return deep;
+    } catch { /* ignore */ }
+  }
+  return null;
+}
+
 /* ---------------- Sign-in / out ---------------- */
 
 /**
  * Sign in using Basic auth (username:password OR email:password)
- * Returns the JWT string when successful.
+ * Returns the JWT string when successful, or null if cookie-only auth is used.
  */
 export async function signIn(loginId, password) {
   if (!loginId || !password) {
     throw new Error("Please enter both login and password.");
   }
 
-  // Construct Basic header
   const basic = btoa(`${loginId}:${password}`);
 
   const resp = await fetch(R01_AUTH_ENDPOINT, {
     method: "POST",
     headers: {
-      "Authorization": `Basic ${basic}`
+      "Authorization": `Basic ${basic}`,
+      "Accept": "application/json, text/plain, */*"
     },
-    // Some servers require an explicit empty body for POST with Basic
-    body: ""
+    // Some backends want an explicit empty body
+    body: "",
+    // Include in case the server sets an auth cookie as fallback
+    credentials: "include",
+    mode: "cors"
   });
 
-  // Network/HTTP handling
   if (!resp.ok) {
     let message = `Sign-in failed (${resp.status})`;
     try {
-      const text = await resp.text();
-      // Many backends return plain text on error; surface it if present
-      if (text && text.length < 400) message = text;
-    } catch { /* ignore */ }
-
-    // Friendly mapped errors
+      const t = await resp.text();
+      if (t && t.length < 400) message = t;
+    } catch {}
     if (resp.status === 401 || resp.status === 403) {
       message = "Invalid credentials. Please check your username/email and password.";
     }
     throw new Error(message);
   }
 
-  // Expect a JWT in response (either JSON or raw text)
-  const contentType = resp.headers.get("content-type") || "";
-  let jwt = "";
-  if (contentType.includes("application/json")) {
-    const data = await resp.json();
-    // Common field names: token / jwt / access_token
-    jwt = data.token || data.jwt || data.access_token || "";
-  } else {
-    jwt = (await resp.text()).trim();
+  // 1) Try response headers
+  let jwt = tokenFromHeaders(resp);
+  if (!jwt) {
+    // 2) Try body (json or text)
+    const contentType = resp.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      try {
+        const data = await resp.json();
+        jwt = data?.token || data?.jwt || data?.access_token || null;
+      } catch {}
+    }
+    if (!jwt) {
+      const text = await resp.text().catch(() => "");
+      jwt = tokenFromBodyText(text);
+    }
   }
 
-  if (!jwt || !jwt.includes(".")) {
-    throw new Error("Unexpected sign-in response: missing JWT.");
+  // If still no JWT but request succeeded, we might be on cookie-based auth.
+  // We'll store nothing and let graphql.js send requests with credentials: 'include'.
+  if (jwt && jwt.includes(".")) {
+    setToken(jwt);
+    return jwt;
   }
 
-  setToken(jwt);
-  return jwt;
+  // If cookie was set, we can proceed without a Bearer token
+  // (graphql.js will handle cookie fallback). Otherwise, error.
+  const maybeCookieAuth = resp.headers.get("set-cookie") || "cookie-maybe";
+  if (maybeCookieAuth) return null;
+
+  throw new Error("Unexpected sign-in response: missing JWT.");
 }
 
 export function signOut() {
@@ -106,13 +152,6 @@ export function signOut() {
 }
 
 /* ---------------- DOM helpers (used by app.js) ---------------- */
-
-/**
- * Wire login form events. Call this once in app.js.
- * Expects:
- *  - #loginForm, #loginError, #loginId, #password, #loginBtn
- *  - #loginSection, #profileSection, #authedNav, #logoutBtn
- */
 export function mountAuthUI() {
   const form = document.getElementById("loginForm");
   const errEl = document.getElementById("loginError");
@@ -132,7 +171,6 @@ export function mountAuthUI() {
     errEl.textContent = "";
     errEl.classList.add("hidden");
   };
-
   const setLoading = (loading) => {
     loginBtn.disabled = loading;
     loginBtn.textContent = loading ? "Signing in…" : "Sign in";
@@ -148,7 +186,6 @@ export function mountAuthUI() {
       loginSection.classList.add("hidden");
       profileSection.classList.remove("hidden");
       authedNav.classList.remove("hidden");
-      // app.js will detect token and fetch data
       document.dispatchEvent(new CustomEvent("auth:signin"));
     } catch (err) {
       showError(err.message || String(err));
@@ -161,15 +198,12 @@ export function mountAuthUI() {
 
   logoutBtn?.addEventListener("click", () => {
     signOut();
-    // Toggle UI back to login
     profileSection.classList.add("hidden");
     authedNav.classList.add("hidden");
     loginSection.classList.remove("hidden");
-    // Let app know
     document.dispatchEvent(new CustomEvent("auth:signout"));
   });
 
-  // Initial state
   if (isAuthed()) {
     loginSection.classList.add("hidden");
     profileSection.classList.remove("hidden");
