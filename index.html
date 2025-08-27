@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GraphQL Profile</title>
+  <title>GraphQL</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="./style.css?v=4" />
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- animated background -->
   <div class="bg">
     <div class="orb orb1"></div>
     <div class="orb orb2"></div>
@@ -19,22 +20,19 @@
       <!-- Inline SVG Logo -->
       <svg class="logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
         <defs>
-          <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id="grad-nav" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stop-color="#7c3aed"/>
             <stop offset="100%" stop-color="#06b6d4"/>
           </linearGradient>
-          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
-            <feMerge>
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
+          <filter id="glow-nav" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
-        <circle cx="60" cy="60" r="52" fill="url(#grad)" stroke="#ffffff33" stroke-width="6" filter="url(#glow)"/>
+        <circle cx="60" cy="60" r="52" fill="url(#grad-nav)" stroke="#ffffff33" stroke-width="6" filter="url(#glow-nav)"/>
         <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
       </svg>
-      <span class="wordmark">GraphQL Profile</span>
+      <span class="wordmark">GraphQL</span>
     </div>
     <nav class="nav">
       <a href="#" id="btn-logout" class="chip">Logout</a>
@@ -45,16 +43,15 @@
   <main id="screen-login" class="screen center">
     <section class="card card-login glass">
       <div class="login-head">
-        <!-- Same SVG logo reused -->
         <div class="logo-wrap">
           <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
             <defs>
-              <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+              <linearGradient id="grad-lg" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stop-color="#7c3aed"/>
                 <stop offset="100%" stop-color="#06b6d4"/>
               </linearGradient>
             </defs>
-            <circle cx="60" cy="60" r="52" fill="url(#grad2)" stroke="#ffffff33" stroke-width="6"/>
+            <circle cx="60" cy="60" r="52" fill="url(#grad-lg)" stroke="#ffffff33" stroke-width="6"/>
             <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
           </svg>
         </div>
@@ -86,12 +83,12 @@
       <div class="logo-wrap">
         <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
           <defs>
-            <linearGradient id="grad3" x1="0%" y1="0%" x2="100%" y2="100%">
+            <linearGradient id="grad-hero" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stop-color="#7c3aed"/>
               <stop offset="100%" stop-color="#06b6d4"/>
             </linearGradient>
           </defs>
-          <circle cx="60" cy="60" r="52" fill="url(#grad3)" stroke="#ffffff33" stroke-width="6"/>
+          <circle cx="60" cy="60" r="52" fill="url(#grad-hero)" stroke="#ffffff33" stroke-width="6"/>
           <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
         </svg>
       </div>
@@ -159,7 +156,7 @@
       GRAPHQL_URL: "https://learn.reboot01.com/api/graphql-engine/v1/graphql"
     };
   </script>
-  <script src="./graphs.js?v=4"></script>
-  <script src="./app.js?v=4"></script>
+  <script src="graphs.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
