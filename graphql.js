@@ -1,4 +1,4 @@
-// graphs.js — simple SVG helpers for charts
+// graphs.js
 (function () {
   function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
   function mk(tag, attrs = {}, parent = null) {
@@ -9,8 +9,7 @@
   }
   function scale(v, d0, d1, r0, r1) {
     if (d1 === d0) return (r0 + r1) / 2;
-    const t = (v - d0) / (d1 - d0);
-    return r0 + t * (r1 - r0);
+    return r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
   }
   function drawAxes(svg, pad) {
     const g = mk("g", { stroke: "#2b3f5b", "stroke-width": "1", fill: "none" }, svg);
@@ -18,7 +17,7 @@
     mk("line", { x1: pad, y1: 20, x2: pad, y2: 200 - pad }, g);
   }
 
-  function drawAreaChart(svg, points) {
+  window.drawAreaChart = function (svg, points) {
     clear(svg);
     if (!points || !points.length) return;
     const pad = 36;
@@ -40,9 +39,9 @@
     const baseY = 200 - pad;
     d += ` L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
     path.setAttribute("d", d);
-  }
+  };
 
-  function drawBarChart(svg, items) {
+  window.drawBarChart = function (svg, items) {
     clear(svg);
     if (!items || !items.length) return;
     const pad = 36, w = 600 - pad * 2, h = 200 - pad * 2;
@@ -58,8 +57,5 @@
       const r = mk("rect", { x, y, width: bw, height: colH, fill: "#2c7be5", rx: 4 }, g);
       mk("title", {}, r).textContent = `${it.label}: ${it.value}`;
     });
-  }
-
-  window.drawAreaChart = drawAreaChart;
-  window.drawBarChart = drawBarChart;
+  };
 })();
