@@ -55,4 +55,3 @@ svg text{fill:#b8c0ff;font-size:11px}.axis path,.axis line{stroke:#202a57}
 .ic-line{mask:linear-gradient(120deg,transparent 45%,#000 46% 54%,transparent 55%)}
 .ic-donut{mask:radial-gradient(circle,#000 52%,transparent 53%)}
 .ic-bars{mask:linear-gradient(#000 0 0) left/20% 60% no-repeat,linear-gradient(#000 0 0) center/20% 30% no-repeat,linear-gradient(#000 0 0) right/20% 80% no-repeat}
-
