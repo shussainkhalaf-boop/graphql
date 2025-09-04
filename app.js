@@ -1,7 +1,8 @@
-// app.js — single-file script tailored to your HTML/CSS
-// Works with: identity/password, remember, #screen-login/#screen-app UI
-// Fixes: total XP (dedup by object), audit ratio via up/down transactions,
-// charts: XP over time, pass/fail donut, XP by project type.
+// app.js — Module XP & correct audit ratio
+// - Total XP (display) = Module XP = sum of MAX XP per PASSED object,
+//   excluding Piscine (but keeping piscine-js as module).
+// - kB shown with floor to match dashboard numbers (e.g., 610 kB).
+// - Audit ratio = sum(up) / sum(down) with two decimals; 0.00 if down==0.
 
 // -------------------- Config --------------------
 const CFG = {
@@ -43,9 +44,10 @@ const svgRatio = $("svg-ratio");
 const svgType  = $("svg-type");
 
 // -------------------- Helpers --------------------
-const nf = new Intl.NumberFormat();
-const fmtXP = (n) => `${Math.ceil((+n || 0) / 1000)} kB`;
-const day = (ts) => new Date(ts).toISOString().slice(0,10);
+// Show kB using FLOOR to avoid inflating the display (e.g. 610 kB not 611/633).
+const fmtKB = (bytes) => `${Math.floor((+bytes || 0) / 1000)} kB`;
+const day   = (ts) => new Date(ts).toISOString().slice(0,10);
+const lastSeg = (p="") => p.split("/").filter(Boolean).pop() || "project";
 
 function toggle(authed){
   if(authed){ scrLogin.classList.add("hidden"); scrApp.classList.remove("hidden"); }
@@ -54,7 +56,6 @@ function toggle(authed){
 
 function storeSet(key, val, remember){
   (remember ? localStorage : sessionStorage).setItem(key, val);
-  // clear the other store (avoid confusion)
   (remember ? sessionStorage : localStorage).removeItem(key);
 }
 function storeGet(key){ return localStorage.getItem(key) || sessionStorage.getItem(key); }
@@ -72,6 +73,16 @@ function decodeJWT(token){
     return JSON.parse(decodeURIComponent(escape(json)));
   }catch{ return null; }
 }
+
+// -------------------- Module vs Piscine classification --------------------
+// Keep piscine-js as module; exclude other piscine from Module XP.
+const RX_PISCINE_JS  = /piscine-js/i;
+const RX_PISCINE_ALL = /piscine(?!-js)/i;
+const isModulePath = (p="") => {
+  if (RX_PISCINE_JS.test(p)) return true;      // keep piscine-js
+  if (RX_PISCINE_ALL.test(p)) return false;    // drop other piscine
+  return true;                                  // module by default
+};
 
 // -------------------- HTTP/GraphQL --------------------
 async function signin(identity, password){
@@ -122,7 +133,7 @@ query XP($uid:Int!){
   transaction(
     where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
     order_by:{ createdAt: asc }
-    limit: 12000
+    limit: 20000
   ){
     amount objectId createdAt path
     object{ id name type }
@@ -143,7 +154,7 @@ query AuditTx($uid:Int!){
   ){ type amount }
 }`;
 
-// -------------------- Charts (SVG) --------------------
+// -------------------- SVG charts --------------------
 function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
 function clear(svg){ while(svg.firstChild) svg.removeChild(svg.firstChild); }
 
@@ -167,7 +178,7 @@ function lineChart(svg, series){
 
   const t1=ns("text"); t1.textContent=new Date(x0).toISOString().slice(0,10); t1.setAttribute("x",P.l); t1.setAttribute("y",H-8); svg.appendChild(t1);
   const t2=ns("text"); t2.textContent=new Date(x1).toISOString().slice(0,10); t2.setAttribute("x",W-P.r-64); t2.setAttribute("y",H-8); svg.appendChild(t2);
-  const t3=ns("text"); t3.textContent=fmtXP(y1); t3.setAttribute("x",10); t3.setAttribute("y",P.t+12); svg.appendChild(t3);
+  const t3=ns("text"); t3.textContent=fmtKB(y1); t3.setAttribute("x",10); t3.setAttribute("y",P.t+12); svg.appendChild(t3);
 }
 
 function donut(svg, pass, fail){
@@ -203,58 +214,87 @@ function bars(svg, entries){
   });
 }
 
-// -------------------- Logic --------------------
-
-// normalize: treat piscine base differently if تبغى، هنا بنحسب الـ XP الكلي بدون استثناءات معقّدة
-// نستخدم أكبر XP لكل objectId (dedupe) حتى ما تتكرر محاولات نفس المشروع.
-function totalXPFromTransactions(rows){
-  const maxByObj=new Map();
-  for(const r of rows){
-    const oid=+r.objectId;
-    const amt=+r.amount||0;
-    if(!Number.isFinite(oid) || amt<=0) continue;
-    if(amt > (maxByObj.get(oid)||0)) maxByObj.set(oid, amt);
+// -------------------- Aggregations (Module/Passed) --------------------
+// Build PASSED set and pass date per object from latest results
+function extractPassInfo(results){
+  const passedIds = new Set();
+  const passDateByObj = new Map();
+  for(const r of results){
+    const oid = +r.objectId;
+    if(!Number.isFinite(oid)) continue;
+    if(+r.grade === 1){
+      passedIds.add(oid);
+      if (!passDateByObj.has(oid)) passDateByObj.set(oid, r.createdAt);
+    }
   }
-  let total=0; maxByObj.forEach(v=> total+=v);
-  return { total, maxByObj };
+  return { passedIds, passDateByObj };
 }
 
-function timeSeriesFrom(rows, whenByObj){
-  // whenByObj: map of objectId -> timestamp (passedAt or first tx)
-  const byDay=new Map();
-  rows.forEach(r=>{
-    const oid=+r.objectId; if(!Number.isFinite(oid)) return;
-    const when = whenByObj.get(oid) || r.createdAt;
-    const d=day(when);
-    const amt=+r.amount||0;
-    byDay.set(d,(byDay.get(d)||0)+amt);
-  });
-  // cumulative using per-day sums with dedupe rules handled by caller
-  const daily=[...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
-  let run=0;
-  return daily.map(([d,amt])=>{ run+=amt; return { x:new Date(d).getTime(), y:run }; });
+// Build max XP per PASSED object and keep sample row (for name/type/path)
+function maxPerPassedObject(xpRows, passedIds){
+  const maxByObj = new Map();   // oid -> max XP
+  const sampleByObj = new Map();// oid -> one representative row (with object/path)
+  const firstDateByObj = new Map(); // for fallback date if no pass date
+  for(const r of xpRows){
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if(!Number.isFinite(oid) || amt<=0) continue;
+    if(!passedIds.has(oid)) continue; // only passed objects
+    if(amt > (maxByObj.get(oid) || 0)) { maxByObj.set(oid, amt); sampleByObj.set(oid, r); }
+    const ts=r.createdAt, prev=firstDateByObj.get(oid) ?? "9999-12-31T00:00:00Z";
+    if(ts < prev) firstDateByObj.set(oid, ts);
+  }
+  return { maxByObj, sampleByObj, firstDateByObj };
 }
 
-function groupXPByType(rows){
-  const sum=new Map(); // type -> xp sum
-  rows.forEach(r=>{
-    const t=(r.object && r.object.type)||"unknown";
+// Build "officialModule" array (Module only, deduped by max XP per passed object)
+function buildOfficialModule({maxByObj, sampleByObj, firstDateByObj}, passDateByObj){
+  const official = [];
+  for(const [oid, amt] of maxByObj.entries()){
+    const base = sampleByObj.get(oid);
+    const when = passDateByObj.get(oid) || firstDateByObj.get(oid) || base.createdAt;
+    const isModule = isModulePath((base.path || "").toLowerCase());
+    if(!isModule) continue; // exclude piscine (except piscine-js which passes isModulePath)
+    official.push({ ...base, amount: amt, createdAt: when });
+  }
+  official.sort((a,b)=> (a.createdAt > b.createdAt ? 1 : -1));
+  return official;
+}
+
+// Time series (cumulative) based on Module/Passed (officialModule)
+function timeSeriesFromOfficial(official){
+  const byDay = new Map();
+  for(const r of official){
+    const d = day(r.createdAt);
+    byDay.set(d, (byDay.get(d) || 0) + (+r.amount || 0));
+  }
+  const daily = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
+  let run = 0;
+  return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
+}
+
+// Group by object type (project/exercise) for Module/Passed (officialModule)
+function groupXPByTypeOfficial(official){
+  const sum=new Map();
+  for(const r of official){
+    const t=(r.object && r.object.type) || "unknown";
     sum.set(t,(sum.get(t)||0)+(+r.amount||0));
-  });
-  return [...sum.entries()].map(([label,value])=>({label,value})).sort((a,b)=> b.value-a.value);
+  }
+  return [...sum.entries()].map(([label,value])=>({label,value}))
+                           .sort((a,b)=> b.value - a.value);
 }
 
-function recentProjectsList(rows, limit=9){
-  const last=rows.slice(-limit).reverse();
-  return last.map(r=>({
-    title: (r.object && r.object.name) || (r.path||"").split("/").pop() || "project",
-    meta: `${(r.createdAt||"").slice(0,10)} · ${fmtXP(r.amount)}`
+// Recent item cards from Module/Passed
+function recentProjectsListOfficial(official, limit=9){
+  const last = official.slice(-limit).reverse();
+  return last.map(r => ({
+    title: (r.object && r.object.name) || lastSeg(r.path||""),
+    meta: `${(r.createdAt||"").slice(0,10)} · ${fmtKB(r.amount)}`
   }));
 }
 
 // -------------------- Load all --------------------
 async function loadAll(){
-  // user
+  // 1) User
   const u = await gql(Q_USER);
   const me = u.user && u.user[0];
   if(!me) throw new Error("Failed to load user.");
@@ -266,7 +306,7 @@ async function loadAll(){
 
   const uid = me.id;
 
-  // parallel data: xp tx, pass/fail (latest per object), audit up/down
+  // 2) Data in parallel
   const [xpRes, resRes, audRes] = await Promise.all([
     gql(Q_XP, { uid }),
     gql(Q_RESULTS, { uid }),
@@ -277,42 +317,24 @@ async function loadAll(){
   const results  = resRes.result || [];
   const audits   = audRes.transaction || [];
 
-  // Total XP (dedupe by objectId: take max amount per object)
-  // ونستخدم تاريخ النجاح إن وجد لخط الزمن (وإلا أول معاملة).
-  const passAtByObj=new Map();
-  results.forEach(r=>{ if(+r.grade===1){ passAtByObj.set(+r.objectId, r.createdAt); } });
+  // 3) Pass info and dedupe-by-max for PASSED objects
+  const { passedIds, passDateByObj } = extractPassInfo(results);
+  const dedup = maxPerPassedObject(xpRows, passedIds);
 
-  // rebuild a per-object list with only max XP, and date chosen (pass date > first tx)
-  const maxByObj=new Map();
-  const firstDateByObj=new Map();
-  const sampleRowByObj=new Map();
+  // 4) Build Module-only list (officialModule)
+  const officialModule = buildOfficialModule(dedup, passDateByObj);
 
-  xpRows.forEach(r=>{
-    const oid=+r.objectId; if(!Number.isFinite(oid)) return;
-    const amt=+r.amount||0; if(amt<=0) return;
-    if(amt>(maxByObj.get(oid)||0)) { maxByObj.set(oid, amt); sampleRowByObj.set(oid, r); }
-    const ts=new Date(r.createdAt).getTime();
-    const prev=firstDateByObj.get(oid) ?? Infinity;
-    if(ts<prev) firstDateByObj.set(oid, r.createdAt);
-  });
+  // 5) Total XP (Module only) — use FLOOR kB
+  const totalModuleXP = officialModule.reduce((s,r)=> s + (+r.amount||0), 0);
+  xpTotalEl.textContent = fmtKB(totalModuleXP);
 
-  // entries for charts/lists using one row per object
-  const official = [...maxByObj.entries()].map(([oid, amt])=>{
-    const base = sampleRowByObj.get(oid);
-    const when = passAtByObj.get(oid) || firstDateByObj.get(oid) || base.createdAt;
-    return { ...base, amount: amt, createdAt: when };
-  }).sort((a,b)=> (a.createdAt>b.createdAt?1:-1));
-
-  const totalXP = official.reduce((s,r)=> s + (+r.amount||0), 0);
-  xpTotalEl.textContent = fmtXP(totalXP);
-
-  // Pass/Fail counts (latest per object)
-  const pass = results.filter(r=> +r.grade===1).length;
-  const fail = results.filter(r=> +r.grade!==1).length;
+  // 6) Pass/Fail counts (from latest per object)
+  const pass = results.filter(r => +r.grade === 1).length;
+  const fail = results.filter(r => +r.grade !== 1).length;
   passedEl.textContent = String(pass);
   failedEl.textContent = String(fail);
 
-  // Audit ratio from up/down transactions (if available)
+  // 7) Audit ratio = sum(up) / sum(down) (two decimals; 0.00 if no down)
   let up=0, down=0;
   audits.forEach(a=>{
     const t=(a.type||"").toLowerCase();
@@ -320,20 +342,20 @@ async function loadAll(){
     if(t==="up") up+=amt;
     else if(t==="down") down+=amt;
   });
-  const ratio = up+down>0 ? (up/(up+down))*100 : 0;
-  auditRatioEl.textContent = (Math.round(ratio*10)/10).toFixed(1) + "%";
+  const ratio = down > 0 ? (up / down) : 0;
+  auditRatioEl.textContent = ratio.toFixed(2);
 
-  // Charts
-  lineChart(svgXP, timeSeriesFrom(official, passAtByObj));
+  // 8) Charts (Module/Passed)
+  lineChart(svgXP, timeSeriesFromOfficial(officialModule));
   donut(svgRatio, pass, fail);
-  bars(svgType, groupXPByType(official));
+  bars(svgType, groupXPByTypeOfficial(officialModule));
 
-  // Recent projects
+  // 9) Recent projects (Module/Passed)
   projectsEl.innerHTML = "";
-  recentProjectsList(official, 9).forEach(it=>{
+  recentProjectsListOfficial(officialModule, 9).forEach(it=>{
     const div=document.createElement("div"); div.className="item";
     const t=document.createElement("div"); t.className="title"; t.textContent=it.title;
-    const m=document.createElement("div"); m.className="meta"; m.textContent=it.meta;
+    const m=document.createElement("div"); m.className="meta";  m.textContent=it.meta;
     div.appendChild(t); div.appendChild(m); projectsEl.appendChild(div);
   });
 }
