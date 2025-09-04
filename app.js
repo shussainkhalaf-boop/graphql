@@ -1,449 +1,396 @@
-// js/app.js
-// Auto-detect SPA or Multi-page and work accordingly.
-// - SPA: if both #login-view and #profile-view exist → keep show()/hide().
-// - Multi-page: if only login form exists → sign in then redirect; if profile elements exist → require JWT then load data.
+// app.js — Module XP & correct audit ratio
+// - Total XP (display) = Module XP = sum of MAX XP per PASSED object,
+//   excluding Piscine (but keeping piscine-js as module).
+// - kB shown with floor to match dashboard numbers (e.g., 610 kB).
+// - Audit ratio = sum(up) / sum(down) with two decimals; 0.00 if down==0.
 
-import { signinBasic, saveToken, getToken, clearToken, decodeJWT, gql } from './api.js';
-import { Q_ME, Q_RESULTS_WITH_USER, Q_XP, Q_OBJECT_NAMES, Q_PASSED_OBJECTS } from './queries.js';
-import { renderLineChart, renderBarChart } from './charts.js';
+// -------------------- Config --------------------
+const CFG = {
+  SIGNIN_URL: (window.__CONFIG__ && window.__CONFIG__.SIGNIN_URL) ||
+              "https://learn.reboot01.com/api/auth/signin",
+  GRAPHQL_URL: (window.__CONFIG__ && window.__CONFIG__.GRAPHQL_URL) ||
+               "https://learn.reboot01.com/api/graphql-engine/v1/graphql",
+  TOKEN_KEY: "jwt",
+};
 
-/* ------------------ Multi-page routes (edit if needed) ------------------ */
-const LOGIN_URL   = 'login.html';    // غيّرها لو اسم صفحة الدخول غير
-const PROFILE_URL = 'profile.html';  // غيّرها لو اسم صفحة البروفايل غير
+// -------------------- DOM --------------------
+const $ = (id) => document.getElementById(id);
 
-/* ------------------ DOM ------------------ */
-const loginView   = document.getElementById('login-view');   // SPA-only
-const profileView = document.getElementById('profile-view'); // SPA-only
-const logoutBtn   = document.getElementById('logout-btn');
+const scrLogin = $("screen-login");
+const scrApp   = $("screen-app");
+const btnLogout= $("btn-logout");
 
-const loginForm   = document.getElementById('login-form');
-const idInput     = document.getElementById('identifier');
-const pwInput     = document.getElementById('password');
-const loginError  = document.getElementById('login-error');
+const form     = $("login-form");
+const inpId    = $("identity");
+const inpPw    = $("password");
+const inpRem   = $("remember");
+const errEl    = $("login-error");
 
-const uLogin = document.getElementById('u-login');
-const uEmail = document.getElementById('u-email');
-const uId    = document.getElementById('u-id');
-const uXP    = document.getElementById('u-xp');
+const heroName = $("hero-name");
+const uId      = $("u-id");
+const uLogin   = $("u-login");
+const uFirst   = $("u-first");
+const uLast    = $("u-last");
 
-const latestList   = document.getElementById('latest-results');
-const noResultsEl  = document.getElementById('no-results');
+const xpTotalEl   = $("xp-total");
+const auditRatioEl= $("audit-ratio");
+const passedEl    = $("passed-count");
+const failedEl    = $("failed-count");
 
-const svgXPTime    = document.getElementById('xp-over-time');
-const noXPTime     = document.getElementById('no-xp-time');
-const svgXPProject = document.getElementById('xp-by-project');
-const noXPProject  = document.getElementById('no-xp-project');
+const projectsEl  = $("projects");
 
-const loadingEl = document.getElementById('loading');
-const toastEl   = document.getElementById('toast');
+const svgXP    = $("svg-xp");
+const svgRatio = $("svg-ratio");
+const svgType  = $("svg-type");
 
-/* ------------------ Rules ------------------ */
-const EXCLUDE_KEYWORDS = ['checkpoint', 'raid', '/audit'];
-const PISCINE_KEYWORD  = 'piscine';
-const EXAM_HINTS       = ['exam'];
-const EXAM_MAX_BYTES   = 300;
+// -------------------- Helpers --------------------
+// Show kB using FLOOR to avoid inflating the display (e.g. 610 kB not 611/633).
+const fmtKB = (bytes) => `${Math.floor((+bytes || 0) / 1000)} kB`;
+const day   = (ts) => new Date(ts).toISOString().slice(0,10);
+const lastSeg = (p="") => p.split("/").filter(Boolean).pop() || "project";
 
-/* ------------------ Utils ------------------ */
-const nf = new Intl.NumberFormat();
-function fmtNum(n){ return nf.format(n); }
-function toDay(ts){ return new Date(ts).toISOString().slice(0,10); }
-function isMobile(){ return window.matchMedia('(max-width: 600px)').matches; }
-
-function startLoading(msg='Loading…'){
-  if(!loadingEl) return;
-  const p = loadingEl.querySelector('p');
-  if (p) p.textContent = msg;
-  loadingEl.classList.remove('hidden');
-  loadingEl.setAttribute('aria-hidden','false');
-}
-function stopLoading(){
-  if(!loadingEl) return;
-  loadingEl.classList.add('hidden');
-  loadingEl.setAttribute('aria-hidden','true');
+function toggle(authed){
+  if(authed){ scrLogin.classList.add("hidden"); scrApp.classList.remove("hidden"); }
+  else { scrApp.classList.add("hidden"); scrLogin.classList.remove("hidden"); }
 }
 
-let toastTimer = null;
-function toast(message, ms=2500){
-  if(!toastEl) return;
-  toastEl.textContent = message;
-  toastEl.classList.remove('hidden');
-  requestAnimationFrame(()=> toastEl.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>{
-    toastEl.classList.remove('show');
-    setTimeout(()=> toastEl.classList.add('hidden'), 250);
-  }, ms);
+function storeSet(key, val, remember){
+  (remember ? localStorage : sessionStorage).setItem(key, val);
+  (remember ? sessionStorage : localStorage).removeItem(key);
+}
+function storeGet(key){ return localStorage.getItem(key) || sessionStorage.getItem(key); }
+function storeDel(key){ localStorage.removeItem(key); sessionStorage.removeItem(key); }
+
+function safeAtob(b64){
+  b64 = String(b64 || "").replace(/-/g,"+").replace(/_/g,"/");
+  const pad = b64.length % 4; if (pad) b64 += "=".repeat(4 - pad);
+  return atob(b64);
+}
+function decodeJWT(token){
+  try{
+    const mid = token.split(".")[1];
+    const json = safeAtob(mid);
+    return JSON.parse(decodeURIComponent(escape(json)));
+  }catch{ return null; }
 }
 
-/* ------------------ Mode detection ------------------ */
-const HAS_SPA_LOGIN   = !!loginView;
-const HAS_SPA_PROFILE = !!profileView;
-const SPA_MODE        = HAS_SPA_LOGIN && HAS_SPA_PROFILE;
+// -------------------- Module vs Piscine classification --------------------
+// Keep piscine-js as module; exclude other piscine from Module XP.
+const RX_PISCINE_JS  = /piscine-js/i;
+const RX_PISCINE_ALL = /piscine(?!-js)/i;
+const isModulePath = (p="") => {
+  if (RX_PISCINE_JS.test(p)) return true;      // keep piscine-js
+  if (RX_PISCINE_ALL.test(p)) return false;    // drop other piscine
+  return true;                                  // module by default
+};
 
-const ON_LOGIN_PAGE   = !!loginForm && !HAS_SPA_PROFILE;   // multi-page login
-const ON_PROFILE_PAGE = !!(uId || uLogin || svgXPTime || svgXPProject) && !HAS_SPA_LOGIN; // multi-page profile
-
-/* ------------------ SPA helpers ------------------ */
-function show(view){
-  if(!SPA_MODE) return; // no-op in multi-page
-  if(view === 'login'){
-    loginView?.classList.add('active');
-    profileView?.classList.remove('active');
-    loginView?.setAttribute('aria-hidden','false');
-    profileView?.setAttribute('aria-hidden','true');
-    if (logoutBtn) logoutBtn.hidden = true;
-  } else {
-    profileView?.classList.add('active');
-    loginView?.classList.remove('active');
-    profileView?.setAttribute('aria-hidden','false');
-    loginView?.setAttribute('aria-hidden','true');
-    if (logoutBtn) logoutBtn.hidden = false;
+// -------------------- HTTP/GraphQL --------------------
+async function signin(identity, password){
+  const basic = btoa(unescape(encodeURIComponent(`${identity}:${password}`)));
+  const res = await fetch(CFG.SIGNIN_URL, {
+    method: "POST",
+    headers: { "Authorization": `Basic ${basic}` }
+  });
+  const text = await res.text().catch(()=> "");
+  if(!res.ok){
+    const msg = text?.trim() || `Signin failed (${res.status})`;
+    throw new Error(msg);
   }
+  const m = String(text).match(/[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+/);
+  if(!m) throw new Error("Signin returned no token.");
+  return m[0];
 }
 
-/* ------------------ Boot ------------------ */
-document.addEventListener('DOMContentLoaded', async () => {
-  const token = getToken();
-  const authed = !!(token && decodeJWT(token));
-
-  // ---- Multi-page routing
-  if (ON_LOGIN_PAGE) {
-    if (authed) {
-      location.replace(PROFILE_URL);
-      return;
-    }
-    wireLoginMulti();
-    return;
+async function gql(query, variables={}){
+  const token = storeGet(CFG.TOKEN_KEY);
+  if(!token) throw new Error("Missing token");
+  const res = await fetch(CFG.GRAPHQL_URL, {
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify({ query, variables })
+  });
+  let body;
+  try{ body = await res.json(); }
+  catch{
+    const raw = await res.text().catch(()=> "");
+    throw new Error(raw?.trim() || `GraphQL HTTP ${res.status}`);
   }
-  if (ON_PROFILE_PAGE) {
-    if (!authed) {
-      location.replace(LOGIN_URL);
-      return;
-    }
-    if (logoutBtn) logoutBtn.addEventListener('click', onLogoutMulti);
-    startLoading('Fetching your profile…');
-    try { await loadProfile(); }
-    catch(err){ toast(err?.message || String(err), 4000); }
-    finally{ stopLoading(); }
-    return;
-  }
-
-  // ---- SPA routing
-  if (SPA_MODE) {
-    if (authed) {
-      show('profile');
-      startLoading('Fetching your profile…');
-      try { await loadProfile(); }
-      catch(err){ toast(err?.message || String(err), 4000); }
-      finally { stopLoading(); }
-    } else {
-      show('login');
-    }
-
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', () => {
-        clearToken();
-        show('login');
-        loginForm?.reset();
-        idInput?.focus();
-        toast('Logged out');
-      });
-    }
-
-    if (loginForm) {
-      loginForm.addEventListener('submit', onLoginSPASubmit);
-    }
-  }
-});
-
-/* ------------------ Multi-page handlers ------------------ */
-function onLogoutMulti(e){
-  e?.preventDefault?.();
-  clearToken();
-  location.replace(LOGIN_URL);
+  if(!res.ok) throw new Error(body?.errors?.[0]?.message || `GraphQL HTTP ${res.status}`);
+  if(body?.errors?.length) throw new Error(body.errors[0].message || "GraphQL error");
+  return body.data;
 }
-function wireLoginMulti(){
-  if (!loginForm) return;
-  loginForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (loginError) loginError.hidden = true;
-    const identifier = idInput?.value?.trim() || '';
-    const password   = pwInput?.value || '';
-    if(!identifier || !password){
-      if(loginError){ loginError.textContent = 'Please enter both identifier and password.'; loginError.hidden = false; }
-      return;
-    }
-    try{
-      const btn = loginForm.querySelector('button[type="submit"]');
-      if (btn) btn.disabled = true;
-      startLoading('Signing you in…');
-      const jwt = await signinBasic(identifier, password);
-      saveToken(jwt);
-      toast('Welcome 👋');
-      location.replace(PROFILE_URL);
-    }catch(err){
-      if(loginError){ loginError.textContent = err?.message || 'Sign in failed.'; loginError.hidden = false; }
-      toast('Signin failed', 2500);
-    }finally{
-      stopLoading();
-      const btn = loginForm.querySelector('button[type="submit"]');
-      if (btn) btn.disabled = false;
-    }
+
+// -------------------- Queries --------------------
+const Q_USER = `
+query Me {
+  user { id login firstName lastName }
+}`;
+const Q_XP = `
+query XP($uid:Int!){
+  transaction(
+    where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
+    order_by:{ createdAt: asc }
+    limit: 20000
+  ){
+    amount objectId createdAt path
+    object{ id name type }
+  }
+}`;
+const Q_RESULTS = `
+query Results($uid:Int!){
+  result(
+    where:{ userId:{_eq:$uid} }
+    order_by:[{objectId: asc},{createdAt: desc}]
+    distinct_on: objectId
+  ){ objectId grade createdAt path }
+}`;
+const Q_AUDIT = `
+query AuditTx($uid:Int!){
+  transaction(
+    where:{ userId:{_eq:$uid}, type:{_in:["up","down"]}, amount:{_gt:0} }
+  ){ type amount }
+}`;
+
+// -------------------- SVG charts --------------------
+function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
+function clear(svg){ while(svg.firstChild) svg.removeChild(svg.firstChild); }
+
+function lineChart(svg, series){
+  clear(svg);
+  const W=+svg.viewBox.baseVal.width||680,H=+svg.viewBox.baseVal.height||280;
+  const P={l:44,r:18,t:16,b:34};
+  if(!series.length){ const t=ns("text"); t.setAttribute("x",10); t.setAttribute("y",22); t.textContent="No data"; svg.appendChild(t); return; }
+  const xs=series.map(d=>d.x), ys=series.map(d=>d.y);
+  const x0=Math.min(...xs), x1=Math.max(...xs), y1=Math.max(1, ...ys), y0=0;
+  const sx=v=>P.l+((v-x0)/Math.max(1,(x1-x0)))*(W-P.l-P.r);
+  const sy=v=>H-P.b-(v/(y1-y0))*(H-P.t-P.b);
+
+  const ax=ns("path");
+  ax.setAttribute("d",`M${P.l},${H-P.b} H${W-P.r} M${P.l},${P.t} V${H-P.b}`);
+  ax.setAttribute("class","axis"); ax.setAttribute("stroke","#202a57"); svg.appendChild(ax);
+
+  let d=""; series.forEach((p,i)=>{ d+=(i?" L":"M")+sx(p.x)+" "+sy(p.y); });
+  const path=ns("path"); path.setAttribute("class","line"); path.setAttribute("d",d); svg.appendChild(path);
+  series.forEach(p=>{ const c=ns("circle"); c.setAttribute("class","dot"); c.setAttribute("r","2.8"); c.setAttribute("cx",sx(p.x)); c.setAttribute("cy",sy(p.y)); svg.appendChild(c); });
+
+  const t1=ns("text"); t1.textContent=new Date(x0).toISOString().slice(0,10); t1.setAttribute("x",P.l); t1.setAttribute("y",H-8); svg.appendChild(t1);
+  const t2=ns("text"); t2.textContent=new Date(x1).toISOString().slice(0,10); t2.setAttribute("x",W-P.r-64); t2.setAttribute("y",H-8); svg.appendChild(t2);
+  const t3=ns("text"); t3.textContent=fmtKB(y1); t3.setAttribute("x",10); t3.setAttribute("y",P.t+12); svg.appendChild(t3);
+}
+
+function donut(svg, pass, fail){
+  clear(svg);
+  const W=+svg.viewBox.baseVal.width||280,H=+svg.viewBox.baseVal.height||280;
+  const cx=W/2, cy=H/2, R=Math.min(W,H)/2-10;
+  const total=Math.max(1,pass+fail);
+  const arc=(start,val,cls)=>{
+    const a0=(start/total)*Math.PI*2-Math.PI/2, a1=((start+val)/total)*Math.PI*2-Math.PI/2;
+    const x0=cx+R*Math.cos(a0), y0=cy+R*Math.sin(a0), x1=cx+R*Math.cos(a1), y1=cy+R*Math.sin(a1);
+    const large=val/total>0.5?1:0;
+    const p=ns("path"); p.setAttribute("d",`M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} L ${cx} ${cy} Z`);
+    p.setAttribute("class",cls); svg.appendChild(p); return start+val;
+  };
+  let s=0; s=arc(s,pass,"slice-pass"); s=arc(s,fail,"slice-fail");
+  const lbl=ns("text"); lbl.textContent=`${Math.round((pass/total)*100)}% pass`; lbl.setAttribute("x",cx); lbl.setAttribute("y",cy+4); lbl.setAttribute("text-anchor","middle"); svg.appendChild(lbl);
+}
+
+function bars(svg, entries){
+  clear(svg);
+  const W=+svg.viewBox.baseVal.width||680,H=+svg.viewBox.baseVal.height||300;
+  const P={l:28,r:16,t:16,b:64};
+  if(!entries.length){ const t=ns("text"); t.setAttribute("x",10); t.setAttribute("y",22); t.textContent="No data"; svg.appendChild(t); return; }
+  const max=Math.max(1, ...entries.map(e=>e.value));
+  const band=(W-P.l-P.r)/entries.length;
+
+  const ax=ns("line"); ax.setAttribute("x1",P.l); ax.setAttribute("y1",H-P.b); ax.setAttribute("x2",W-P.r); ax.setAttribute("y2",H-P.b); ax.setAttribute("stroke","#202a57"); svg.appendChild(ax);
+
+  entries.forEach((e,i)=>{
+    const v=e.value, h=(v/max)*(H-P.t-P.b), x=P.l+i*band, y=H-P.b-h;
+    const r=ns("rect"); r.setAttribute("x",x+8); r.setAttribute("y",y); r.setAttribute("width",Math.max(10,band-16)); r.setAttribute("height",h); r.setAttribute("fill","#7aa2ff"); r.setAttribute("rx","7"); svg.appendChild(r);
+    const tx=ns("text"); tx.setAttribute("x",x+band/2); tx.setAttribute("y",H-12); tx.setAttribute("text-anchor","middle"); tx.textContent=e.label; svg.appendChild(tx);
   });
 }
 
-/* ------------------ SPA login handler ------------------ */
-async function onLoginSPASubmit(e){
+// -------------------- Aggregations (Module/Passed) --------------------
+// Build PASSED set and pass date per object from latest results
+function extractPassInfo(results){
+  const passedIds = new Set();
+  const passDateByObj = new Map();
+  for(const r of results){
+    const oid = +r.objectId;
+    if(!Number.isFinite(oid)) continue;
+    if(+r.grade === 1){
+      passedIds.add(oid);
+      if (!passDateByObj.has(oid)) passDateByObj.set(oid, r.createdAt);
+    }
+  }
+  return { passedIds, passDateByObj };
+}
+
+// Build max XP per PASSED object and keep sample row (for name/type/path)
+function maxPerPassedObject(xpRows, passedIds){
+  const maxByObj = new Map();   // oid -> max XP
+  const sampleByObj = new Map();// oid -> one representative row (with object/path)
+  const firstDateByObj = new Map(); // for fallback date if no pass date
+  for(const r of xpRows){
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if(!Number.isFinite(oid) || amt<=0) continue;
+    if(!passedIds.has(oid)) continue; // only passed objects
+    if(amt > (maxByObj.get(oid) || 0)) { maxByObj.set(oid, amt); sampleByObj.set(oid, r); }
+    const ts=r.createdAt, prev=firstDateByObj.get(oid) ?? "9999-12-31T00:00:00Z";
+    if(ts < prev) firstDateByObj.set(oid, ts);
+  }
+  return { maxByObj, sampleByObj, firstDateByObj };
+}
+
+// Build "officialModule" array (Module only, deduped by max XP per passed object)
+function buildOfficialModule({maxByObj, sampleByObj, firstDateByObj}, passDateByObj){
+  const official = [];
+  for(const [oid, amt] of maxByObj.entries()){
+    const base = sampleByObj.get(oid);
+    const when = passDateByObj.get(oid) || firstDateByObj.get(oid) || base.createdAt;
+    const isModule = isModulePath((base.path || "").toLowerCase());
+    if(!isModule) continue; // exclude piscine (except piscine-js which passes isModulePath)
+    official.push({ ...base, amount: amt, createdAt: when });
+  }
+  official.sort((a,b)=> (a.createdAt > b.createdAt ? 1 : -1));
+  return official;
+}
+
+// Time series (cumulative) based on Module/Passed (officialModule)
+function timeSeriesFromOfficial(official){
+  const byDay = new Map();
+  for(const r of official){
+    const d = day(r.createdAt);
+    byDay.set(d, (byDay.get(d) || 0) + (+r.amount || 0));
+  }
+  const daily = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
+  let run = 0;
+  return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
+}
+
+// Group by object type (project/exercise) for Module/Passed (officialModule)
+function groupXPByTypeOfficial(official){
+  const sum=new Map();
+  for(const r of official){
+    const t=(r.object && r.object.type) || "unknown";
+    sum.set(t,(sum.get(t)||0)+(+r.amount||0));
+  }
+  return [...sum.entries()].map(([label,value])=>({label,value}))
+                           .sort((a,b)=> b.value - a.value);
+}
+
+// Recent item cards from Module/Passed
+function recentProjectsListOfficial(official, limit=9){
+  const last = official.slice(-limit).reverse();
+  return last.map(r => ({
+    title: (r.object && r.object.name) || lastSeg(r.path||""),
+    meta: `${(r.createdAt||"").slice(0,10)} · ${fmtKB(r.amount)}`
+  }));
+}
+
+// -------------------- Load all --------------------
+async function loadAll(){
+  // 1) User
+  const u = await gql(Q_USER);
+  const me = u.user && u.user[0];
+  if(!me) throw new Error("Failed to load user.");
+  uId.textContent    = me.id ?? "—";
+  uLogin.textContent = me.login ?? "—";
+  uFirst.textContent = me.firstName ?? "—";
+  uLast.textContent  = me.lastName ?? "—";
+  heroName.textContent = me.login ? `${me.login}'s profile` : "Your profile";
+
+  const uid = me.id;
+
+  // 2) Data in parallel
+  const [xpRes, resRes, audRes] = await Promise.all([
+    gql(Q_XP, { uid }),
+    gql(Q_RESULTS, { uid }),
+    gql(Q_AUDIT, { uid }),
+  ]);
+
+  const xpRows   = xpRes.transaction || [];
+  const results  = resRes.result || [];
+  const audits   = audRes.transaction || [];
+
+  // 3) Pass info and dedupe-by-max for PASSED objects
+  const { passedIds, passDateByObj } = extractPassInfo(results);
+  const dedup = maxPerPassedObject(xpRows, passedIds);
+
+  // 4) Build Module-only list (officialModule)
+  const officialModule = buildOfficialModule(dedup, passDateByObj);
+
+  // 5) Total XP (Module only) — use FLOOR kB
+  const totalModuleXP = officialModule.reduce((s,r)=> s + (+r.amount||0), 0);
+  xpTotalEl.textContent = fmtKB(totalModuleXP);
+
+  // 6) Pass/Fail counts (from latest per object)
+  const pass = results.filter(r => +r.grade === 1).length;
+  const fail = results.filter(r => +r.grade !== 1).length;
+  passedEl.textContent = String(pass);
+  failedEl.textContent = String(fail);
+
+  // 7) Audit ratio = sum(up) / sum(down) (two decimals; 0.00 if no down)
+  let up=0, down=0;
+  audits.forEach(a=>{
+    const t=(a.type||"").toLowerCase();
+    const amt=+a.amount||0;
+    if(t==="up") up+=amt;
+    else if(t==="down") down+=amt;
+  });
+  const ratio = down > 0 ? (up / down) : 0;
+  auditRatioEl.textContent = ratio.toFixed(2);
+
+  // 8) Charts (Module/Passed)
+  lineChart(svgXP, timeSeriesFromOfficial(officialModule));
+  donut(svgRatio, pass, fail);
+  bars(svgType, groupXPByTypeOfficial(officialModule));
+
+  // 9) Recent projects (Module/Passed)
+  projectsEl.innerHTML = "";
+  recentProjectsListOfficial(officialModule, 9).forEach(it=>{
+    const div=document.createElement("div"); div.className="item";
+    const t=document.createElement("div"); t.className="title"; t.textContent=it.title;
+    const m=document.createElement("div"); m.className="meta";  m.textContent=it.meta;
+    div.appendChild(t); div.appendChild(m); projectsEl.appendChild(div);
+  });
+}
+
+// -------------------- Events --------------------
+btnLogout.addEventListener("click", (e)=>{
   e.preventDefault();
-  if (loginError) loginError.hidden = true;
-  const identifier = idInput?.value?.trim() || '';
-  const password   = pwInput?.value || '';
-  if(!identifier || !password){
-    if(loginError){ loginError.textContent = 'Please enter both identifier and password.'; loginError.hidden = false; }
-    return;
-  }
-  try{
-    const btn = loginForm.querySelector('button[type="submit"]');
-    if (btn) btn.disabled = true;
-    startLoading('Signing you in…');
-    const jwt = await signinBasic(identifier, password);
-    saveToken(jwt);
-    show('profile');
-    startLoading('Loading your data…');
-    await loadProfile();
-    toast('Welcome 👋');
-  }catch(err){
-    if(loginError){ loginError.textContent = err?.message || 'Sign in failed.'; loginError.hidden = false; }
-    toast('Signin failed', 2500);
-  }finally{
-    stopLoading();
-    const btn = loginForm.querySelector('button[type="submit"]');
-    if (btn) btn.disabled = false;
-  }
-}
-
-/* ------------------ Profile loader (shared) ------------------ */
-let isLoadingProfile = false;
-async function loadProfile(){
-  if (isLoadingProfile) return;
-  isLoadingProfile = true;
-  try{
-    // Who am I
-    const me = await gql(Q_ME);
-    const user = me?.user?.[0];
-    if(!user) throw new Error('Failed to load user.');
-    if(uLogin) uLogin.textContent = user.login ?? '—';
-    if(uEmail) uEmail.textContent = user.email ?? '—';
-    if(uId)    uId.textContent    = user.id ?? '—';
-
-    // Data
-    const [xpData, passedData, feedData] = await Promise.all([
-      gql(Q_XP, { userId: user.id }),
-      gql(Q_PASSED_OBJECTS, { userId: user.id }),
-      gql(Q_RESULTS_WITH_USER)
-    ]);
-
-    // Feed list
-    if (latestList && noResultsEl){
-      const results = feedData?.result ?? [];
-      latestList.replaceChildren();
-      if(!results.length){
-        noResultsEl.hidden = false;
-      }else{
-        noResultsEl.hidden = true;
-        results.forEach(r => {
-          const li = document.createElement('li');
-          const left = document.createElement('span');
-          const right = document.createElement('strong');
-          left.textContent = `${new Date(r.createdAt).toLocaleDateString()} • ${r.type || 'result'} #${r.id}`;
-          right.textContent = String(r.grade);
-          li.append(left, right);
-          latestList.appendChild(li);
-        });
-      }
-    }
-
-    // Transactions / progress
-    const txsAll = xpData?.transaction ?? [];
-    const passedRowsAll = passedData?.progress ?? [];
-
-    if (!txsAll.length) {
-      if(uXP) uXP.textContent = '0 kB';
-      if(svgXPTime && noXPTime){ svgXPTime.replaceChildren(); noXPTime.hidden = false; }
-      if(svgXPProject && noXPProject){ svgXPProject.replaceChildren(); noXPProject.hidden = false; }
-      return;
-    }
-
-    // Global exclusions
-    const txs = txsAll.filter(t => {
-      const p = (t.path||'').toLowerCase();
-      return !EXCLUDE_KEYWORDS.some(k => p.includes(k));
-    });
-    const passedRows = passedRowsAll.filter(p => {
-      const path = (p.path||'').toLowerCase();
-      return !EXCLUDE_KEYWORDS.some(k => path.includes(k));
-    });
-
-    // Per-object aggregates
-    const idsFromTx        = new Set();
-    const firstTxDateByObj = new Map();
-    const maxXPByObj       = new Map();
-    const samplePathByObj  = new Map();
-
-    txs.forEach(t => {
-      const oid = Number(t.objectId);
-      if (!Number.isFinite(oid)) return;
-      idsFromTx.add(oid);
-
-      const amt = Number(t.amount || 0);
-      if (amt > (maxXPByObj.get(oid) || 0)) maxXPByObj.set(oid, amt);
-
-      const ts = new Date(t.createdAt).getTime();
-      const prev = firstTxDateByObj.get(oid) ?? Infinity;
-      if (ts < prev) firstTxDateByObj.set(oid, ts);
-
-      if (!samplePathByObj.has(oid) && t.path) samplePathByObj.set(oid, t.path.toLowerCase());
-    });
-
-    const allObjIds = [...idsFromTx];
-
-    // Object meta
-    const objMeta = allObjIds.length ? await gql(Q_OBJECT_NAMES, { ids: allObjIds }) : { object: [] };
-    const typeById       = new Map((objMeta?.object || []).map(o => [Number(o.id), (o.type || '').toLowerCase()]));
-    const rawNameById    = new Map((objMeta?.object || []).map(o => [Number(o.id), (o.name || '')]));
-    const nameLowerById  = new Map((objMeta?.object || []).map(o => [Number(o.id), (o.name || '').toLowerCase()]));
-
-    // Pass dates (earliest)
-    const passDateByObj = new Map();
-    passedRows.forEach(p => {
-      const oid = Number(p.objectId);
-      if (!Number.isFinite(oid)) return;
-      const ts = new Date(p.createdAt).getTime();
-      const prev = passDateByObj.get(oid) ?? Infinity;
-      if (ts < prev) passDateByObj.set(oid, ts);
-    });
-
-    // ---------------- Inclusion logic (same as قبل) ----------------
-    // 1) Include ALL projects
-    const projectIds = allObjIds.filter(oid => typeById.get(oid) === 'project');
-    const includedIdsSet = new Set(projectIds);
-
-    // 2) Include ONE Piscine root project (largest XP)
-    const piscineCandidates = allObjIds
-      .filter(oid => {
-        const n = (nameLowerById.get(oid) || '');
-        const p = (samplePathByObj.get(oid) || '');
-        return n.includes(PISCINE_KEYWORD) || p.includes(PISCINE_KEYWORD);
-      })
-      .map(oid => ({ oid, amt: maxXPByObj.get(oid) || 0 }))
-      .filter(x => x.amt > 0)
-      .sort((a,b)=> b.amt - a.amt);
-    if (piscineCandidates.length) includedIdsSet.add(piscineCandidates[0].oid);
-
-    // 3) Always include exam micro-exercises
-    allObjIds.forEach(oid => {
-      if (includedIdsSet.has(oid)) return;
-      if (typeById.get(oid) !== 'exercise') return;
-      const amt  = maxXPByObj.get(oid) || 0;
-      const name = (nameLowerById.get(oid) || '');
-      const path = (samplePathByObj.get(oid) || '');
-      const hintsExam = EXAM_HINTS.some(h => name.includes(h) || path.includes(h));
-      const tiny      = amt > 0 && amt <= EXAM_MAX_BYTES;
-      if (hintsExam || tiny) includedIdsSet.add(oid);
-    });
-
-    const includedIds = [...includedIdsSet];
-
-    // Build entries and totals
-    const officialEntries = [];
-    let officialTotal = 0;
-    includedIds.forEach(oid => {
-      const amt = maxXPByObj.get(oid) || 0;
-      if (amt <= 0) return;
-      const ts = passDateByObj.get(oid) ?? firstTxDateByObj.get(oid);
-      if (ts == null) return;
-      officialEntries.push({ objectId: oid, amount: amt, passedAt: new Date(ts).toISOString() });
-      officialTotal += amt;
-    });
-
-    // Display total in kB (same style you had: ceil)
-    const kb = Math.ceil(officialTotal / 1000);
-    if(uXP) uXP.textContent = kb + ' kB';
-
-    // ---------------- Charts ----------------
-    // XP over time
-    if (svgXPTime && noXPTime) {
-      const byDay = new Map();
-      officialEntries.forEach(e => {
-        const day = toDay(e.passedAt);
-        byDay.set(day, (byDay.get(day) || 0) + e.amount);
-      });
-      const dailySorted = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
-      let running = 0;
-      const seriesTime = dailySorted.map(([d,amt]) => {
-        running += amt;
-        return { x: new Date(d).getTime(), y: running, label: `${d}: total ${fmtNum(running)} XP` };
-      });
-
-      if(seriesTime.length){
-        noXPTime.hidden = true;
-        renderLineChart(svgXPTime, seriesTime, {
-          xAccessor: d => d.x,
-          yAccessor: d => d.y,
-          titles: seriesTime.map(d => d.label),
-          yLabel: 'Cumulative XP',
-          margin: isMobile() ? { t:16, r:12, b:42, l:52 } : { t:18, r:16, b:34, l:56 }
-        });
-      } else {
-        noXPTime.hidden = false;
-        svgXPTime.replaceChildren();
-      }
-    }
-
-    // XP by project (bars)
-    if (svgXPProject && noXPProject){
-      let bars = officialEntries.map(e => ({
-        id: e.objectId,
-        name: (rawNameById.get(e.objectId) || String(e.objectId)).replace(/\bproject—|\bpiscine—/gi, ''),
-        sum: e.amount
-      }))
-      .sort((a,b)=> b.sum - a.sum)
-      .slice(0, 16);
-
-      if(bars.length){
-        noXPProject.hidden = true;
-        renderBarChart(svgXPProject, bars, {
-          xAccessor: d => d.name,
-          yAccessor: d => d.sum,
-          labelAccessor: d => d.name,
-          yLabel: 'XP',
-          margin: isMobile() ? { t:16, r:12, b:76, l:52 } : { t:18, r:16, b:58, l:56 }
-        });
-      } else {
-        noXPProject.hidden = false;
-        svgXPProject.replaceChildren();
-      }
-    }
-
-    console.debug('[XP]',
-      'includedIds:', includedIds.length,
-      'officialTotal:', officialTotal, 'displayKB(ceil):', Math.ceil(officialTotal/1000)
-    );
-  } finally {
-    isLoadingProfile = false;
-  }
-}
-
-/* ------------------ Re-render on resize (profile only) ------------------ */
-let rerenderTimer = null;
-window.addEventListener('resize', () => {
-  // SPA: re-render فقط إذا كنا على الـprofile view
-  if (SPA_MODE && !profileView?.classList.contains('active')) return;
-  // Multi-page: اشتغل لو نحن بصفحة البروفايل
-  if (!SPA_MODE && !ON_PROFILE_PAGE) return;
-
-  clearTimeout(rerenderTimer);
-  rerenderTimer = setTimeout(() => {
-    loadProfile().catch(console.error);
-  }, 200);
+  storeDel(CFG.TOKEN_KEY);
+  toggle(false);
+  errEl.classList.add("hidden");
 });
+
+form.addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  errEl.classList.add("hidden");
+  const id = inpId.value.trim();
+  const pw = inpPw.value;
+  if(!id || !pw){
+    errEl.textContent="Please enter both fields."; errEl.classList.remove("hidden"); return;
+  }
+  try{
+    const jwt = await signin(id, pw);
+    storeSet(CFG.TOKEN_KEY, jwt, !!inpRem.checked);
+    toggle(true);
+    await loadAll();
+  }catch(err){
+    errEl.textContent = err?.message || "Signin failed.";
+    errEl.classList.remove("hidden");
+  }
+});
+
+// -------------------- Boot --------------------
+(function init(){
+  const jwt = storeGet(CFG.TOKEN_KEY);
+  const ok = jwt && decodeJWT(jwt);
+  if(ok){ toggle(true); loadAll().catch(e=>{ errEl.textContent = e?.message || String(e); errEl.classList.remove("hidden"); }); }
+  else { toggle(false); }
+})();
