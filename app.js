@@ -1,7 +1,4 @@
-// app.js — single-file script tailored to your HTML/CSS
-// Works with: identity/password, remember, #screen-login/#screen-app UI
-// Fixes: total XP (dedup by object), audit ratio via up/down transactions,
-// charts: XP over time, pass/fail donut, XP by project type.
+// app.js — fixes Total XP & Audit ratio (sum-up), updates charts accordingly
 
 // -------------------- Config --------------------
 const CFG = {
@@ -54,7 +51,6 @@ function toggle(authed){
 
 function storeSet(key, val, remember){
   (remember ? localStorage : sessionStorage).setItem(key, val);
-  // clear the other store (avoid confusion)
   (remember ? sessionStorage : localStorage).removeItem(key);
 }
 function storeGet(key){ return localStorage.getItem(key) || sessionStorage.getItem(key); }
@@ -122,7 +118,7 @@ query XP($uid:Int!){
   transaction(
     where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
     order_by:{ createdAt: asc }
-    limit: 12000
+    limit: 20000
   ){
     amount objectId createdAt path
     object{ id name type }
@@ -143,7 +139,7 @@ query AuditTx($uid:Int!){
   ){ type amount }
 }`;
 
-// -------------------- Charts (SVG) --------------------
+// -------------------- SVG charts --------------------
 function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
 function clear(svg){ while(svg.firstChild) svg.removeChild(svg.firstChild); }
 
@@ -203,50 +199,41 @@ function bars(svg, entries){
   });
 }
 
-// -------------------- Logic --------------------
+// -------------------- Aggregations (fixed logic) --------------------
 
-// normalize: treat piscine base differently if تبغى، هنا بنحسب الـ XP الكلي بدون استثناءات معقّدة
-// نستخدم أكبر XP لكل objectId (dedupe) حتى ما تتكرر محاولات نفس المشروع.
-function totalXPFromTransactions(rows){
-  const maxByObj=new Map();
+// Total XP = sum of ALL xp transactions (amount>0), no dedupe per object.
+function sumTotalXP(rows){
+  let total = 0;
+  for(const r of rows){ total += (+r.amount || 0); }
+  return total;
+}
+
+// Time series: sum per day (no dedupe), then cumulative.
+function seriesFromRows(rows){
+  const byDay = new Map();
   for(const r of rows){
-    const oid=+r.objectId;
-    const amt=+r.amount||0;
-    if(!Number.isFinite(oid) || amt<=0) continue;
-    if(amt > (maxByObj.get(oid)||0)) maxByObj.set(oid, amt);
+    const d = day(r.createdAt);
+    byDay.set(d, (byDay.get(d) || 0) + (+r.amount || 0));
   }
-  let total=0; maxByObj.forEach(v=> total+=v);
-  return { total, maxByObj };
+  const daily = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
+  let run = 0;
+  return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
 }
 
-function timeSeriesFrom(rows, whenByObj){
-  // whenByObj: map of objectId -> timestamp (passedAt or first tx)
-  const byDay=new Map();
-  rows.forEach(r=>{
-    const oid=+r.objectId; if(!Number.isFinite(oid)) return;
-    const when = whenByObj.get(oid) || r.createdAt;
-    const d=day(when);
-    const amt=+r.amount||0;
-    byDay.set(d,(byDay.get(d)||0)+amt);
-  });
-  // cumulative using per-day sums with dedupe rules handled by caller
-  const daily=[...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
-  let run=0;
-  return daily.map(([d,amt])=>{ run+=amt; return { x:new Date(d).getTime(), y:run }; });
+// XP by project type: sum amounts grouped by object.type
+function groupByType(rows){
+  const sum = new Map();
+  for(const r of rows){
+    const t = (r.object && r.object.type) || "unknown";
+    sum.set(t, (sum.get(t) || 0) + (+r.amount || 0));
+  }
+  return [...sum.entries()].map(([label,value])=>({label,value}))
+                           .sort((a,b)=> b.value - a.value);
 }
 
-function groupXPByType(rows){
-  const sum=new Map(); // type -> xp sum
-  rows.forEach(r=>{
-    const t=(r.object && r.object.type)||"unknown";
-    sum.set(t,(sum.get(t)||0)+(+r.amount||0));
-  });
-  return [...sum.entries()].map(([label,value])=>({label,value})).sort((a,b)=> b.value-a.value);
-}
-
-function recentProjectsList(rows, limit=9){
-  const last=rows.slice(-limit).reverse();
-  return last.map(r=>({
+// Recent projects: last N transactions (most recent first)
+function recentList(rows, limit=9){
+  return rows.slice(-limit).reverse().map(r => ({
     title: (r.object && r.object.name) || (r.path||"").split("/").pop() || "project",
     meta: `${(r.createdAt||"").slice(0,10)} · ${fmtXP(r.amount)}`
   }));
@@ -266,7 +253,7 @@ async function loadAll(){
 
   const uid = me.id;
 
-  // parallel data: xp tx, pass/fail (latest per object), audit up/down
+  // parallel data
   const [xpRes, resRes, audRes] = await Promise.all([
     gql(Q_XP, { uid }),
     gql(Q_RESULTS, { uid }),
@@ -277,42 +264,17 @@ async function loadAll(){
   const results  = resRes.result || [];
   const audits   = audRes.transaction || [];
 
-  // Total XP (dedupe by objectId: take max amount per object)
-  // ونستخدم تاريخ النجاح إن وجد لخط الزمن (وإلا أول معاملة).
-  const passAtByObj=new Map();
-  results.forEach(r=>{ if(+r.grade===1){ passAtByObj.set(+r.objectId, r.createdAt); } });
-
-  // rebuild a per-object list with only max XP, and date chosen (pass date > first tx)
-  const maxByObj=new Map();
-  const firstDateByObj=new Map();
-  const sampleRowByObj=new Map();
-
-  xpRows.forEach(r=>{
-    const oid=+r.objectId; if(!Number.isFinite(oid)) return;
-    const amt=+r.amount||0; if(amt<=0) return;
-    if(amt>(maxByObj.get(oid)||0)) { maxByObj.set(oid, amt); sampleRowByObj.set(oid, r); }
-    const ts=new Date(r.createdAt).getTime();
-    const prev=firstDateByObj.get(oid) ?? Infinity;
-    if(ts<prev) firstDateByObj.set(oid, r.createdAt);
-  });
-
-  // entries for charts/lists using one row per object
-  const official = [...maxByObj.entries()].map(([oid, amt])=>{
-    const base = sampleRowByObj.get(oid);
-    const when = passAtByObj.get(oid) || firstDateByObj.get(oid) || base.createdAt;
-    return { ...base, amount: amt, createdAt: when };
-  }).sort((a,b)=> (a.createdAt>b.createdAt?1:-1));
-
-  const totalXP = official.reduce((s,r)=> s + (+r.amount||0), 0);
+  // ---- FIXED: Total XP (sum of all xp transactions) ----
+  const totalXP = sumTotalXP(xpRows);
   xpTotalEl.textContent = fmtXP(totalXP);
 
-  // Pass/Fail counts (latest per object)
+  // Pass/Fail counts (latest per object via distinct_on)
   const pass = results.filter(r=> +r.grade===1).length;
   const fail = results.filter(r=> +r.grade!==1).length;
   passedEl.textContent = String(pass);
   failedEl.textContent = String(fail);
 
-  // Audit ratio from up/down transactions (if available)
+  // ---- FIXED: Audit ratio = sum(up) / sum(down) ----
   let up=0, down=0;
   audits.forEach(a=>{
     const t=(a.type||"").toLowerCase();
@@ -320,17 +282,20 @@ async function loadAll(){
     if(t==="up") up+=amt;
     else if(t==="down") down+=amt;
   });
-  const ratio = up+down>0 ? (up/(up+down))*100 : 0;
-  auditRatioEl.textContent = (Math.round(ratio*10)/10).toFixed(1) + "%";
+  let ratioText = "—";
+  if (down > 0) ratioText = (up / down).toFixed(2);
+  else if (up > 0) ratioText = "∞";
+  else ratioText = "0.00";
+  auditRatioEl.textContent = ratioText;
 
-  // Charts
-  lineChart(svgXP, timeSeriesFrom(official, passAtByObj));
+  // Charts (use new logic)
+  lineChart(svgXP, seriesFromRows(xpRows));
   donut(svgRatio, pass, fail);
-  bars(svgType, groupXPByType(official));
+  bars(svgType, groupByType(xpRows));
 
   // Recent projects
   projectsEl.innerHTML = "";
-  recentProjectsList(official, 9).forEach(it=>{
+  recentList(xpRows, 9).forEach(it=>{
     const div=document.createElement("div"); div.className="item";
     const t=document.createElement("div"); t.className="title"; t.textContent=it.title;
     const m=document.createElement("div"); m.className="meta"; m.textContent=it.meta;
