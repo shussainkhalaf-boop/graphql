@@ -1,73 +1,134 @@
-// js/queries.js (variant) — same exports, tidier formatting
+import { gql } from '@apollo/client';
 
-export const Q_ME = /* GraphQL */ `
-query Me {
-  user {
-    id
-    login
-    email
+// Normal Query: get user info
+export const GET_USER_INFO = gql`
+  query GetUserDetails {
+    user {
+      id
+      login
+      email
+      createdAt
+      updatedAt
+      firstName
+      lastName
+    }
+  }
+`;
+
+// Argument-based Query: get total xp
+export const GEt_Total_XPInKB = gql`
+query GetTotalXPInKB($userId: Int!) {
+  transaction_aggregate(where: { userId: { _eq: $userId }, type: { _eq: "xp" } }) {
+    aggregate {
+      sum {
+        amount
+      }
+    }
   }
 }
 `;
 
-export const Q_OBJECT_BY_ID = /* GraphQL */ `
-query OneObject($id: Int!) {
-  object(where: { id: { _eq: $id }}) {
-    id
-    name
-    type
+// Query to calculate piscineGoXP
+export const GET_PISCINE_GO_XP = gql`
+  query GetPiscineGoXP($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
+        path: { _like: "%bh-piscine%" }
+      }
+    ) {
+      amount
+    }
   }
-}
 `;
 
-export const Q_RESULTS_WITH_USER = /* GraphQL */ `
-query ResultsWithUser {
-  result(limit: 5, order_by: { createdAt: desc }) {
-    id
-    grade
-    type
-    createdAt
-    user { id login }
+
+// Query to calculate piscineJsXP
+export const GET_PISCINE_JS_XP = gql`
+  query GetPiscineJsXP($userId: Int!) {
+    transaction_aggregate(
+      where: {
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
+        event: {path: { _like: "%piscine-js%" }}
+      }
+    ) {
+      aggregate {
+        sum {
+          amount
+        }
+      }
+    }
   }
-}
 `;
 
-// Slightly higher limit; we still sort asc by createdAt
-export const Q_XP = /* GraphQL */ `
-query XP($userId: Int!) {
+
+// Query to calculate projectXP from bhmodule
+export const GET_PROJECT_XP = gql`
+  query {
+    transaction_aggregate(
+      where: {
+        event: { path: { _eq: "/bahrain/bh-module" } }
+        type: { _eq: "xp" }
+      }
+    ) {
+      aggregate {
+        sum {
+          amount
+        }
+      }
+    }
+  }
+
+`;
+
+
+
+export const GET_PROJECTS_WITH_XP = gql`
+  query GetProjectsAndXP($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
+        object: { type: { _eq: "project" } }
+      }
+        order_by: { createdAt: asc }
+    ) {
+      id
+      object {
+        name
+      }
+      amount
+      createdAt
+    }
+  }
+`;
+
+export const GET_PROJECTS_PASS_FAIL = gql`
+  query GetProjectsPassFail($userId: Int!) {
+    progress(where: { userId: { _eq: $userId }, object: { type: { _eq: "project" } } }) {
+      grade
+    }
+  }
+`;
+
+export const GET_LATEST_PROJECTS_WITH_XP =gql`query GetLatestProjectsAndXP($userId: Int!) {
   transaction(
-    where: { userId: { _eq: $userId }, type: { _eq: "xp" } }
-    order_by: { createdAt: asc }
-    limit: 12000
+    where: {
+      userId: { _eq: $userId },
+      type: { _eq: "xp" },
+      object: { type: { _eq: "project" } }
+    }
+    order_by: { createdAt: desc }
+    limit: 12
   ) {
-    amount
-    objectId
-    createdAt
-    path
-  }
-}
-`;
-
-export const Q_OBJECT_NAMES = /* GraphQL */ `
-query ObjectNames($ids: [Int!]) {
-  object(where: { id: { _in: $ids }}) {
     id
-    name
-    type
-  }
-}
-`;
-
-export const Q_PASSED_OBJECTS = /* GraphQL */ `
-query PassedObjects($userId: Int!) {
-  progress(
-    where: { userId: { _eq: $userId }, grade: { _eq: 1 } }
-    order_by: { createdAt: asc }
-    limit: 12000
-  ) {
-    objectId
+    object {
+      name
+    }
+    amount
     createdAt
-    path
   }
 }
-`;
+  `;
