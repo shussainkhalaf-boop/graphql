@@ -1,4 +1,5 @@
-// app.js — fixes Total XP & Audit ratio (sum-up), updates charts accordingly
+// app.js — fixes Total XP (Module: max-per-passed object; exclude piscine except piscine-js)
+// and keeps your existing charts/ratio logic.
 
 // -------------------- Config --------------------
 const CFG = {
@@ -41,7 +42,8 @@ const svgType  = $("svg-type");
 
 // -------------------- Helpers --------------------
 const nf = new Intl.NumberFormat();
-const fmtXP = (n) => `${Math.ceil((+n || 0) / 1000)} kB`;
+// FLOOR kB to match dashboard numbers (e.g., 610 kB; no artificial bump)
+const fmtXP = (n) => `${Math.floor((+n || 0) / 1000)} kB`;
 const day = (ts) => new Date(ts).toISOString().slice(0,10);
 
 function toggle(authed){
@@ -67,6 +69,17 @@ function decodeJWT(token){
     const json = safeAtob(mid);
     return JSON.parse(decodeURIComponent(escape(json)));
   }catch{ return null; }
+}
+
+// -------------------- Module vs Piscine classification --------------------
+// Treat 'piscine' as non-module EXCEPT 'piscine-js' which counts as module.
+const RX_PISCINE_JS  = /piscine-js/i;
+const RX_PISCINE_ALL = /piscine(?!-js)/i;
+function isModuleItem(path = "", name = "") {
+  const s = (String(path) + " " + String(name)).toLowerCase();
+  if (RX_PISCINE_JS.test(s)) return true;    // keep piscine-js
+  if (RX_PISCINE_ALL.test(s)) return false;  // drop other piscine
+  return true;                                // module by default
 }
 
 // -------------------- HTTP/GraphQL --------------------
@@ -131,6 +144,17 @@ query Results($uid:Int!){
     order_by:[{objectId: asc},{createdAt: desc}]
     distinct_on: objectId
   ){ objectId grade createdAt path }
+}`;
+// Any passed attempt (NOT just latest): robust source of “passed”
+const Q_PASSED = `
+query PassedObjects($uid:Int!){
+  progress(
+    where:{ userId:{_eq:$uid}, grade:{_eq:1} }
+    order_by:{ createdAt: asc }
+    limit: 20000
+  ){
+    objectId createdAt path
+  }
 }`;
 const Q_AUDIT = `
 query AuditTx($uid:Int!){
@@ -199,16 +223,16 @@ function bars(svg, entries){
   });
 }
 
-// -------------------- Aggregations (fixed logic) --------------------
+// -------------------- Aggregations (your existing logic kept) --------------------
 
-// Total XP = sum of ALL xp transactions (amount>0), no dedupe per object.
+// Sum of ALL xp transactions (kept for charts) — not used for TOTAL XP display anymore.
 function sumTotalXP(rows){
   let total = 0;
   for(const r of rows){ total += (+r.amount || 0); }
   return total;
 }
 
-// Time series: sum per day (no dedupe), then cumulative.
+// Time series: sum per day, then cumulative (kept for charts)
 function seriesFromRows(rows){
   const byDay = new Map();
   for(const r of rows){
@@ -220,7 +244,7 @@ function seriesFromRows(rows){
   return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
 }
 
-// XP by project type: sum amounts grouped by object.type
+// XP by project type (kept for bars)
 function groupByType(rows){
   const sum = new Map();
   for(const r of rows){
@@ -253,20 +277,52 @@ async function loadAll(){
 
   const uid = me.id;
 
-  // parallel data
-  const [xpRes, resRes, audRes] = await Promise.all([
+  // parallel data (add passedRes)
+  const [xpRes, resRes, audRes, passedRes] = await Promise.all([
     gql(Q_XP, { uid }),
     gql(Q_RESULTS, { uid }),
     gql(Q_AUDIT, { uid }),
+    gql(Q_PASSED, { uid }),       // ✅ any pass ever
   ]);
 
-  const xpRows   = xpRes.transaction || [];
-  const results  = resRes.result || [];
-  const audits   = audRes.transaction || [];
+  const xpRows     = xpRes.transaction || [];
+  const results    = resRes.result || [];
+  const audits     = audRes.transaction || [];
+  const passedRows = passedRes.progress || [];
 
-  // ---- FIXED: Total XP (sum of all xp transactions) ----
-  const totalXP = sumTotalXP(xpRows);
-  xpTotalEl.textContent = fmtXP(totalXP);
+  // ---- CORRECT: Total XP = Module XP (max per PASSED object; exclude piscine except piscine-js) ----
+
+  // 1) Build PASSED object set
+  const passedIds = new Set();
+  passedRows.forEach(r => {
+    const oid = +r.objectId;
+    if (Number.isFinite(oid)) passedIds.add(oid);
+  });
+
+  // 2) For each PASSED object, take MAX XP (from xp transactions)
+  const maxByObj = new Map();   // oid -> max XP
+  const sampleByObj = new Map();// keep row to read path/name for module filter
+  for (const r of xpRows) {
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if (!Number.isFinite(oid) || amt <= 0) continue;
+    if (!passedIds.has(oid)) continue; // only passed objects
+    if (amt > (maxByObj.get(oid) || 0)) {
+      maxByObj.set(oid, amt);
+      sampleByObj.set(oid, r);
+    }
+  }
+
+  // 3) Sum module-only (exclude piscine; keep piscine-js)
+  let totalModuleXP = 0;
+  for (const [oid, amt] of maxByObj.entries()) {
+    const row  = sampleByObj.get(oid) || {};
+    const path = row.path || "";
+    const name = (row.object && row.object.name) || "";
+    if (isModuleItem(path, name)) totalModuleXP += amt;
+  }
+
+  // 4) Display TOTAL XP with FLOOR kB
+  xpTotalEl.textContent = fmtXP(totalModuleXP);
 
   // Pass/Fail counts (latest per object via distinct_on)
   const pass = results.filter(r=> +r.grade===1).length;
@@ -274,7 +330,7 @@ async function loadAll(){
   passedEl.textContent = String(pass);
   failedEl.textContent = String(fail);
 
-  // ---- FIXED: Audit ratio = sum(up) / sum(down) ----
+  // ---- Audit ratio = sum(up) / sum(down) ----
   let up=0, down=0;
   audits.forEach(a=>{
     const t=(a.type||"").toLowerCase();
@@ -288,12 +344,12 @@ async function loadAll(){
   else ratioText = "0.00";
   auditRatioEl.textContent = ratioText;
 
-  // Charts (use new logic)
+  // Charts (kept as in your version)
   lineChart(svgXP, seriesFromRows(xpRows));
   donut(svgRatio, pass, fail);
   bars(svgType, groupByType(xpRows));
 
-  // Recent projects
+  // Recent projects (kept)
   projectsEl.innerHTML = "";
   recentList(xpRows, 9).forEach(it=>{
     const div=document.createElement("div"); div.className="item";
