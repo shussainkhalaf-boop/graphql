@@ -1,5 +1,5 @@
-// app.js — Total XP = sum(max XP per PASSED object), Audit ratio = sum(up)/sum(down)
-// Uses your page IDs: login, profile, stats, charts, projects, etc.
+// app.js — Total XP = Module XP (passed + max-per-object; exclude piscine except piscine-js)
+// Audit ratio = sum(up)/sum(down) with 2 decimals (0.00 if down==0)
 
 // -------------------- Config --------------------
 const CFG = {
@@ -43,6 +43,7 @@ const svgType  = $("svg-type");
 // -------------------- Helpers --------------------
 const fmtKB = (bytes) => `${Math.ceil((+bytes || 0) / 1000)} kB`;
 const day   = (ts) => new Date(ts).toISOString().slice(0,10);
+const lastSeg = (p="") => p.split("/").filter(Boolean).pop() || "project";
 
 function toggle(authed){
   if(authed){ scrLogin.classList.add("hidden"); scrApp.classList.remove("hidden"); }
@@ -142,6 +143,16 @@ query AuditTx($uid:Int!){
   ){ type amount }
 }`;
 
+// -------------------- Rules for "Module" --------------------
+// keep piscine-js as module; exclude other piscine
+const RX_PISCINE_JS  = /piscine-js/i;
+const RX_PISCINE_ALL = /piscine(?!-js)/i;
+function classifyPath(path=""){
+  if (RX_PISCINE_JS.test(path)) return "piscine-js";
+  if (RX_PISCINE_ALL.test(path)) return "piscine";
+  return "module";
+}
+
 // -------------------- SVG charts --------------------
 function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
 function clear(svg){ while(svg.firstChild) svg.removeChild(svg.firstChild); }
@@ -202,9 +213,9 @@ function bars(svg, entries){
   });
 }
 
-// -------------------- Aggregations (PASSED-only, max per object) --------------------
+// -------------------- Aggregations (Module XP) --------------------
 
-// Build PASSED set and pass date per object from latest results
+// Build PASSED set + pass date from latest results
 function extractPassInfo(results){
   const passedIds = new Set();
   const passDateByObj = new Map();
@@ -213,94 +224,90 @@ function extractPassInfo(results){
     if(!Number.isFinite(oid)) continue;
     if(+r.grade === 1){
       passedIds.add(oid);
-      // createdAt هنا هو آخر نتيجة؛ نستخدمها كتاريخ النجاح
       if (!passDateByObj.has(oid)) passDateByObj.set(oid, r.createdAt);
     }
   }
   return { passedIds, passDateByObj };
 }
 
-// Total XP = sum of MAX amount per PASSED object
-function totalPassedXP(xpRows, passedIds){
-  const maxByObj = new Map();
+// Max XP per PASSED object + classification (module / piscine / piscine-js)
+function maxPerPassedObject(xpRows, passedIds){
+  const maxByObj = new Map();          // oid -> max amount
+  const clsByObj = new Map();          // oid -> "module" | "piscine" | "piscine-js"
+  const nameByObj= new Map();          // oid -> label
   for(const r of xpRows){
     const oid = +r.objectId, amt = +r.amount || 0;
-    if (!Number.isFinite(oid) || amt <= 0) continue;
-    if (!passedIds.has(oid)) continue;
-    if (amt > (maxByObj.get(oid) || 0)) maxByObj.set(oid, amt);
+    if(!Number.isFinite(oid) || amt<=0) continue;
+    if(!passedIds.has(oid)) continue;
+    if(amt > (maxByObj.get(oid) || 0)) {
+      maxByObj.set(oid, amt);
+      const p = (r.path || "").toLowerCase();
+      clsByObj.set(oid, classifyPath(p));
+      nameByObj.set(oid, (r.object && r.object.name) || lastSeg(r.path || "") || `#${oid}`);
+    }
   }
-  let total = 0; maxByObj.forEach(v => total += v);
-  return { total, maxByObj };
+  return { maxByObj, clsByObj, nameByObj };
 }
 
-// Time series (cumulative) using PASSED objects only, amount = max per object, date = pass date (fallback to first tx)
-function passedSeries(xpRows, passedIds, passDateByObj){
-  const firstTxByObj = new Map();
-  for(const r of xpRows){
-    const oid = +r.objectId;
-    if(!passedIds.has(oid)) continue;
-    const ts = r.createdAt;
-    const prev = firstTxByObj.get(oid) ?? "9999-12-31T00:00:00Z";
-    if (ts < prev) firstTxByObj.set(oid, ts);
-  }
+// Module totals (exclude piscine, keep piscine-js)
+function moduleTotals(maxByObj, clsByObj){
+  let totalAll=0, totalPiscine=0;
+  maxByObj.forEach((amt, oid)=>{
+    totalAll += amt;
+    if (clsByObj.get(oid) === "piscine") totalPiscine += amt;
+  });
+  const module = totalAll - totalPiscine; // piscine-js included here
+  return { totalAll, totalPiscine, module };
+}
 
-  // pick date: pass date if exists else first tx
-  const amountByObj = new Map();
-  for(const r of xpRows){
-    const oid = +r.objectId, amt = +r.amount || 0;
-    if(!passedIds.has(oid) || amt<=0) continue;
-    if (amt > (amountByObj.get(oid) || 0)) amountByObj.set(oid, amt);
-  }
-
+// Series: cumulative Module XP by day using pass date
+function moduleSeries(maxByObj, clsByObj, passDateByObj){
   const byDay = new Map();
-  for(const [oid, amt] of amountByObj){
-    const when = passDateByObj.get(oid) || firstTxByObj.get(oid);
+  maxByObj.forEach((amt, oid)=>{
+    if (clsByObj.get(oid) === "piscine") return; // exclude piscine
+    const when = passDateByObj.get(oid);
     const d = day(when);
     byDay.set(d, (byDay.get(d) || 0) + amt);
-  }
-
+  });
   const daily = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
   let run = 0;
   return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
 }
 
-// XP by type based on PASSED objects only (max per object)
-function passedByType(xpRows, passedIds){
-  const maxByObj = new Map();
+// By type (project/exercise) but Module-only
+function moduleByType(maxByObj, clsByObj, nameByObj, xpRows){
+  // need object type per oid (from any sample row)
   const typeByObj = new Map();
   for(const r of xpRows){
-    const oid = +r.objectId, amt = +r.amount || 0;
-    if(!passedIds.has(oid) || amt<=0) continue;
-    if (amt > (maxByObj.get(oid) || 0)) maxByObj.set(oid, amt);
-    const t = (r.object && r.object.type) || "unknown";
-    if(!typeByObj.has(oid)) typeByObj.set(oid, t);
+    const oid = +r.objectId;
+    if (!maxByObj.has(oid)) continue; // only passed set
+    if (!typeByObj.has(oid)) {
+      const t = (r.object && r.object.type) || "unknown";
+      typeByObj.set(oid, t);
+    }
   }
-  const sum = new Map(); // type -> sum
-  for(const [oid, amt] of maxByObj){
+  const sum = new Map();
+  maxByObj.forEach((amt, oid)=>{
+    if (clsByObj.get(oid) === "piscine") return; // exclude piscine
     const t = typeByObj.get(oid) || "unknown";
     sum.set(t, (sum.get(t) || 0) + amt);
-  }
+  });
   return [...sum.entries()].map(([label,value])=>({label,value}))
                            .sort((a,b)=> b.value - a.value);
 }
 
-// Recent projects: from PASSED objects (sorted by pass date desc), value = max XP
-function recentPassed(xpRows, passedIds, passDateByObj, limit=9){
-  // Build max amount & sample meta per object
-  const maxByObj = new Map();
-  const sampleByObj = new Map();
-  for(const r of xpRows){
-    const oid = +r.objectId, amt = +r.amount || 0;
-    if(!passedIds.has(oid) || amt<=0) continue;
-    if (amt > (maxByObj.get(oid) || 0)) { maxByObj.set(oid, amt); sampleByObj.set(oid, r); }
-  }
-  // Compose entries with pass date
-  const items = [...maxByObj.entries()].map(([oid, amt])=>{
-    const s = sampleByObj.get(oid);
-    const title = (s.object && s.object.name) || (s.path||"").split("/").pop() || `#${oid}`;
-    const when  = passDateByObj.get(oid) || s.createdAt;
-    return { title, date: when, amount: amt };
-  }).sort((a,b)=> (a.date < b.date ? 1 : -1));
+// Recent Module projects (exclude piscine, sort by pass date desc)
+function recentModule(maxByObj, clsByObj, nameByObj, passDateByObj, limit=9){
+  const items = [];
+  maxByObj.forEach((amt, oid)=>{
+    if (clsByObj.get(oid) === "piscine") return;
+    items.push({
+      title: nameByObj.get(oid) || `#${oid}`,
+      date:  passDateByObj.get(oid) || "",
+      amount: amt
+    });
+  });
+  items.sort((a,b)=> (a.date < b.date ? 1 : -1));
   return items.slice(0, limit).map(it => ({
     title: it.title,
     meta: `${(it.date||"").slice(0,10)} · ${fmtKB(it.amount)}`
@@ -335,9 +342,12 @@ async function loadAll(){
   // --- Pass info ---
   const { passedIds, passDateByObj } = extractPassInfo(results);
 
-  // --- Total XP (fixed): sum of max XP per PASSED object only ---
-  const { total } = totalPassedXP(xpRows, passedIds);
-  xpTotalEl.textContent = fmtKB(total);
+  // --- Max-per-object for passed only (with classification) ---
+  const { maxByObj, clsByObj, nameByObj } = maxPerPassedObject(xpRows, passedIds);
+
+  // --- Module totals (this is your "Total XP") ---
+  const totals = moduleTotals(maxByObj, clsByObj);
+  xpTotalEl.textContent = fmtKB(totals.module);
 
   // --- Pass / Fail counts (from latest per object) ---
   const pass = results.filter(r => +r.grade === 1).length;
@@ -345,7 +355,7 @@ async function loadAll(){
   passedEl.textContent = String(pass);
   failedEl.textContent = String(fail);
 
-  // --- Audit ratio (fixed): sum(up) / sum(down) ---
+  // --- Audit ratio: sum(up)/sum(down) with 2 decimals; 0.00 if no down ---
   let up=0, down=0;
   audits.forEach(a=>{
     const t=(a.type||"").toLowerCase();
@@ -353,23 +363,21 @@ async function loadAll(){
     if(t==="up") up+=amt;
     else if(t==="down") down+=amt;
   });
-  let ratioText = "0.00";
-  if (down > 0) ratioText = (up / down).toFixed(2);
-  else if (up > 0) ratioText = "∞";
-  auditRatioEl.textContent = ratioText;
+  const ratio = down > 0 ? (up / down) : 0;
+  auditRatioEl.textContent = ratio.toFixed(2);
 
-  // --- Charts: based on PASSED-only, max-per-object ---
-  const series = passedSeries(xpRows, passedIds, passDateByObj);
+  // --- Charts (Module only) ---
+  const series = moduleSeries(maxByObj, clsByObj, passDateByObj);
   lineChart(svgXP, series);
 
   donut(svgRatio, pass, fail);
 
-  const byType = passedByType(xpRows, passedIds);
+  const byType = moduleByType(maxByObj, clsByObj, nameByObj, xpRows);
   bars(svgType, byType);
 
-  // --- Recent projects: PASSED only ---
+  // --- Recent projects (Module only) ---
   projectsEl.innerHTML = "";
-  recentPassed(xpRows, passedIds, passDateByObj, 9).forEach(it=>{
+  recentModule(maxByObj, clsByObj, nameByObj, passDateByObj, 9).forEach(it=>{
     const div=document.createElement("div"); div.className="item";
     const t=document.createElement("div"); t.className="title"; t.textContent=it.title;
     const m=document.createElement("div"); m.className="meta"; m.textContent=it.meta;
