@@ -1,8 +1,5 @@
-// app.js — Module XP & correct audit ratio
-// - Total XP (display) = Module XP = sum of MAX XP per PASSED object,
-//   excluding Piscine (but keeping piscine-js as module).
-// - kB shown with floor to match dashboard numbers (e.g., 610 kB).
-// - Audit ratio = sum(up) / sum(down) with two decimals; 0.00 if down==0.
+// app.js — Module XP (max-per-passed object via progress), correct audit ratio,
+// proper project ordering (cards: newest first; line chart: chronological)
 
 // -------------------- Config --------------------
 const CFG = {
@@ -44,7 +41,7 @@ const svgRatio = $("svg-ratio");
 const svgType  = $("svg-type");
 
 // -------------------- Helpers --------------------
-// Show kB using FLOOR to avoid inflating the display (e.g. 610 kB not 611/633).
+// Display kB using FLOOR to match dashboard (e.g., 610 kB not 611/633)
 const fmtKB = (bytes) => `${Math.floor((+bytes || 0) / 1000)} kB`;
 const day   = (ts) => new Date(ts).toISOString().slice(0,10);
 const lastSeg = (p="") => p.split("/").filter(Boolean).pop() || "project";
@@ -76,12 +73,14 @@ function decodeJWT(token){
 
 // -------------------- Module vs Piscine classification --------------------
 // Keep piscine-js as module; exclude other piscine from Module XP.
+// We check BOTH path and object name to avoid undercounting.
 const RX_PISCINE_JS  = /piscine-js/i;
 const RX_PISCINE_ALL = /piscine(?!-js)/i;
-const isModulePath = (p="") => {
-  if (RX_PISCINE_JS.test(p)) return true;      // keep piscine-js
-  if (RX_PISCINE_ALL.test(p)) return false;    // drop other piscine
-  return true;                                  // module by default
+const isModuleItem = (path="", name="") => {
+  const s = (String(path) + " " + String(name)).toLowerCase();
+  if (RX_PISCINE_JS.test(s)) return true;   // count piscine-js as module
+  if (RX_PISCINE_ALL.test(s)) return false; // drop other piscine
+  return true;                               // module by default
 };
 
 // -------------------- HTTP/GraphQL --------------------
@@ -124,10 +123,13 @@ async function gql(query, variables={}){
 }
 
 // -------------------- Queries --------------------
+// User info
 const Q_USER = `
 query Me {
   user { id login firstName lastName }
 }`;
+
+// All positive XP transactions (we dedupe by object later)
 const Q_XP = `
 query XP($uid:Int!){
   transaction(
@@ -139,19 +141,35 @@ query XP($uid:Int!){
     object{ id name type }
   }
 }`;
-const Q_RESULTS = `
-query Results($uid:Int!){
-  result(
-    where:{ userId:{_eq:$uid} }
-    order_by:[{objectId: asc},{createdAt: desc}]
-    distinct_on: objectId
-  ){ objectId grade createdAt path }
+
+// ✅ Any passed attempt (NOT just latest): use progress grade=1
+const Q_PASSED = `
+query PassedObjects($uid:Int!){
+  progress(
+    where:{ userId:{_eq:$uid}, grade:{_eq:1} }
+    order_by:{ createdAt: asc }
+    limit: 20000
+  ){
+    objectId createdAt path
+  }
 }`;
+
+// Audit up/down sums
 const Q_AUDIT = `
 query AuditTx($uid:Int!){
   transaction(
     where:{ userId:{_eq:$uid}, type:{_in:["up","down"]}, amount:{_gt:0} }
   ){ type amount }
+}`;
+
+// For pass/fail counts we still want the latest outcome per object
+const Q_RESULTS_LATEST = `
+query ResultsLatest($uid:Int!){
+  result(
+    where:{ userId:{_eq:$uid} }
+    order_by:[{objectId: asc},{createdAt: desc}]
+    distinct_on: objectId
+  ){ objectId grade createdAt path }
 }`;
 
 // -------------------- SVG charts --------------------
@@ -214,53 +232,56 @@ function bars(svg, entries){
   });
 }
 
-// -------------------- Aggregations (Module/Passed) --------------------
-// Build PASSED set and pass date per object from latest results
-function extractPassInfo(results){
+// -------------------- Aggregations --------------------
+// Build set of PASSED object IDs from progress (any pass ever)
+function passedFromProgress(rows){
   const passedIds = new Set();
-  const passDateByObj = new Map();
-  for(const r of results){
+  const firstPassDate = new Map(); // earliest pass date (used as pass date)
+  for(const r of rows){
     const oid = +r.objectId;
     if(!Number.isFinite(oid)) continue;
-    if(+r.grade === 1){
-      passedIds.add(oid);
-      if (!passDateByObj.has(oid)) passDateByObj.set(oid, r.createdAt);
-    }
+    passedIds.add(oid);
+    const ts = r.createdAt;
+    const prev = firstPassDate.get(oid) ?? "9999-12-31T00:00:00Z";
+    if (ts < prev) firstPassDate.set(oid, ts);
   }
-  return { passedIds, passDateByObj };
+  return { passedIds, firstPassDate };
 }
 
-// Build max XP per PASSED object and keep sample row (for name/type/path)
-function maxPerPassedObject(xpRows, passedIds){
-  const maxByObj = new Map();   // oid -> max XP
-  const sampleByObj = new Map();// oid -> one representative row (with object/path)
-  const firstDateByObj = new Map(); // for fallback date if no pass date
+// Max XP per PASSED object, keep a sample row and earliest tx date
+function maxXPPerPassed(xpRows, passedIds){
+  const maxByObj = new Map();
+  const sampleByObj = new Map();
+  const firstTxByObj = new Map();
   for(const r of xpRows){
     const oid = +r.objectId, amt = +r.amount || 0;
     if(!Number.isFinite(oid) || amt<=0) continue;
-    if(!passedIds.has(oid)) continue; // only passed objects
-    if(amt > (maxByObj.get(oid) || 0)) { maxByObj.set(oid, amt); sampleByObj.set(oid, r); }
-    const ts=r.createdAt, prev=firstDateByObj.get(oid) ?? "9999-12-31T00:00:00Z";
-    if(ts < prev) firstDateByObj.set(oid, ts);
+    if(!passedIds.has(oid)) continue;
+    if (amt > (maxByObj.get(oid) || 0)) { maxByObj.set(oid, amt); sampleByObj.set(oid, r); }
+    const ts = r.createdAt, prev = firstTxByObj.get(oid) ?? "9999-12-31T00:00:00Z";
+    if (ts < prev) firstTxByObj.set(oid, ts);
   }
-  return { maxByObj, sampleByObj, firstDateByObj };
+  return { maxByObj, sampleByObj, firstTxByObj };
 }
 
-// Build "officialModule" array (Module only, deduped by max XP per passed object)
-function buildOfficialModule({maxByObj, sampleByObj, firstDateByObj}, passDateByObj){
+// Build Module-only list (deduped, one row per object with its MAX XP)
+// passDate = earliest pass date; fallback = earliest tx
+function buildOfficialModule({maxByObj, sampleByObj, firstTxByObj}, passDateByObj){
   const official = [];
   for(const [oid, amt] of maxByObj.entries()){
     const base = sampleByObj.get(oid);
-    const when = passDateByObj.get(oid) || firstDateByObj.get(oid) || base.createdAt;
-    const isModule = isModulePath((base.path || "").toLowerCase());
-    if(!isModule) continue; // exclude piscine (except piscine-js which passes isModulePath)
+    const when = passDateByObj.get(oid) || firstTxByObj.get(oid) || base.createdAt;
+    const path = base.path || "";
+    const name = (base.object && base.object.name) || "";
+    if (!isModuleItem(path, name)) continue; // exclude piscine (except piscine-js)
     official.push({ ...base, amount: amt, createdAt: when });
   }
+  // For charts we need chronological order
   official.sort((a,b)=> (a.createdAt > b.createdAt ? 1 : -1));
   return official;
 }
 
-// Time series (cumulative) based on Module/Passed (officialModule)
+// Time series (cumulative) based on Module/Passed
 function timeSeriesFromOfficial(official){
   const byDay = new Map();
   for(const r of official){
@@ -272,7 +293,7 @@ function timeSeriesFromOfficial(official){
   return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
 }
 
-// Group by object type (project/exercise) for Module/Passed (officialModule)
+// Group by object type (project/exercise) for Module/Passed
 function groupXPByTypeOfficial(official){
   const sum=new Map();
   for(const r of official){
@@ -283,13 +304,15 @@ function groupXPByTypeOfficial(official){
                            .sort((a,b)=> b.value - a.value);
 }
 
-// Recent item cards from Module/Passed
+// Recent cards: NEWEST FIRST (pass date desc)
 function recentProjectsListOfficial(official, limit=9){
-  const last = official.slice(-limit).reverse();
-  return last.map(r => ({
-    title: (r.object && r.object.name) || lastSeg(r.path||""),
-    meta: `${(r.createdAt||"").slice(0,10)} · ${fmtKB(r.amount)}`
-  }));
+  return [...official]
+    .sort((a,b)=> (a.createdAt < b.createdAt ? 1 : -1))
+    .slice(0, limit)
+    .map(r => ({
+      title: (r.object && r.object.name) || lastSeg(r.path||""),
+      meta: `${(r.createdAt||"").slice(0,10)} · ${fmtKB(r.amount)}`
+    }));
 }
 
 // -------------------- Load all --------------------
@@ -307,34 +330,38 @@ async function loadAll(){
   const uid = me.id;
 
   // 2) Data in parallel
-  const [xpRes, resRes, audRes] = await Promise.all([
+  const [xpRes, passedRes, auditRes, latestRes] = await Promise.all([
     gql(Q_XP, { uid }),
-    gql(Q_RESULTS, { uid }),
+    gql(Q_PASSED, { uid }),        // ✅ any pass ever
     gql(Q_AUDIT, { uid }),
+    gql(Q_RESULTS_LATEST, { uid }),// latest outcome for pass/fail counts
   ]);
 
   const xpRows   = xpRes.transaction || [];
-  const results  = resRes.result || [];
-  const audits   = audRes.transaction || [];
+  const passedRows = passedRes.progress || [];
+  const audits   = auditRes.transaction || [];
+  const latest   = latestRes.result || [];
 
-  // 3) Pass info and dedupe-by-max for PASSED objects
-  const { passedIds, passDateByObj } = extractPassInfo(results);
-  const dedup = maxPerPassedObject(xpRows, passedIds);
+  // 3) Build "passed" set from progress (robust) + earliest pass date
+  const { passedIds, firstPassDate } = passedFromProgress(passedRows);
 
-  // 4) Build Module-only list (officialModule)
-  const officialModule = buildOfficialModule(dedup, passDateByObj);
+  // 4) Dedup by MAX XP per passed object
+  const dedup = maxXPPerPassed(xpRows, passedIds);
 
-  // 5) Total XP (Module only) — use FLOOR kB
+  // 5) Module-only official list (one per object, with pass date)
+  const officialModule = buildOfficialModule(dedup, firstPassDate);
+
+  // 6) Total XP (Module only) — FLOOR kB
   const totalModuleXP = officialModule.reduce((s,r)=> s + (+r.amount||0), 0);
   xpTotalEl.textContent = fmtKB(totalModuleXP);
 
-  // 6) Pass/Fail counts (from latest per object)
-  const pass = results.filter(r => +r.grade === 1).length;
-  const fail = results.filter(r => +r.grade !== 1).length;
+  // 7) Pass/Fail counts from latest outcomes (unchanged)
+  const pass = latest.filter(r => +r.grade === 1).length;
+  const fail = latest.filter(r => +r.grade !== 1).length;
   passedEl.textContent = String(pass);
   failedEl.textContent = String(fail);
 
-  // 7) Audit ratio = sum(up) / sum(down) (two decimals; 0.00 if no down)
+  // 8) Audit ratio = sum(up) / sum(down) (two decimals; 0.00 if no down)
   let up=0, down=0;
   audits.forEach(a=>{
     const t=(a.type||"").toLowerCase();
@@ -345,12 +372,12 @@ async function loadAll(){
   const ratio = down > 0 ? (up / down) : 0;
   auditRatioEl.textContent = ratio.toFixed(2);
 
-  // 8) Charts (Module/Passed)
-  lineChart(svgXP, timeSeriesFromOfficial(officialModule));
+  // 9) Charts (Module/Passed)
+  lineChart(svgXP, timeSeriesFromOfficial(officialModule));        // chronological
   donut(svgRatio, pass, fail);
   bars(svgType, groupXPByTypeOfficial(officialModule));
 
-  // 9) Recent projects (Module/Passed)
+  // 10) Recent projects (Module/Passed) — NEWEST FIRST
   projectsEl.innerHTML = "";
   recentProjectsListOfficial(officialModule, 9).forEach(it=>{
     const div=document.createElement("div"); div.className="item";
