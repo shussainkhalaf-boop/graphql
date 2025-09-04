@@ -1,24 +1,25 @@
-// js/app.js  (multi-page version: no single-page toggling)
-// Requires: api.js, queries.js, charts.js
+// js/app.js
+// Auto-detect SPA or Multi-page and work accordingly.
+// - SPA: if both #login-view and #profile-view exist → keep show()/hide().
+// - Multi-page: if only login form exists → sign in then redirect; if profile elements exist → require JWT then load data.
 
 import { signinBasic, saveToken, getToken, clearToken, decodeJWT, gql } from './api.js';
 import { Q_ME, Q_RESULTS_WITH_USER, Q_XP, Q_OBJECT_NAMES, Q_PASSED_OBJECTS } from './queries.js';
 import { renderLineChart, renderBarChart } from './charts.js';
 
-/* -------------------------------------------------------
-   Routing (edit these to match your filenames/paths)
--------------------------------------------------------- */
-const LOGIN_URL   = 'login.html';    // ← عدّلها إذا اسم صفحة تسجيل الدخول مختلف
-const PROFILE_URL = 'profile.html';  // ← عدّلها إذا اسم صفحة البروفايل مختلف
+/* ------------------ Multi-page routes (edit if needed) ------------------ */
+const LOGIN_URL   = 'login.html';    // غيّرها لو اسم صفحة الدخول غير
+const PROFILE_URL = 'profile.html';  // غيّرها لو اسم صفحة البروفايل غير
 
-/* -------------------------------------------------------
-   DOM (guarded – works whether elements exist or not)
--------------------------------------------------------- */
+/* ------------------ DOM ------------------ */
+const loginView   = document.getElementById('login-view');   // SPA-only
+const profileView = document.getElementById('profile-view'); // SPA-only
+const logoutBtn   = document.getElementById('logout-btn');
+
 const loginForm   = document.getElementById('login-form');
 const idInput     = document.getElementById('identifier');
 const pwInput     = document.getElementById('password');
 const loginError  = document.getElementById('login-error');
-const logoutBtn   = document.getElementById('logout-btn');
 
 const uLogin = document.getElementById('u-login');
 const uEmail = document.getElementById('u-email');
@@ -37,7 +38,7 @@ const loadingEl = document.getElementById('loading');
 const toastEl   = document.getElementById('toast');
 
 /* ------------------ Rules ------------------ */
-const EXCLUDE_KEYWORDS = ['checkpoint', 'raid', '/audit']; // always drop
+const EXCLUDE_KEYWORDS = ['checkpoint', 'raid', '/audit'];
 const PISCINE_KEYWORD  = 'piscine';
 const EXAM_HINTS       = ['exam'];
 const EXAM_MAX_BYTES   = 300;
@@ -50,7 +51,8 @@ function isMobile(){ return window.matchMedia('(max-width: 600px)').matches; }
 
 function startLoading(msg='Loading…'){
   if(!loadingEl) return;
-  loadingEl.querySelector?.('p')?.textContent = msg;
+  const p = loadingEl.querySelector('p');
+  if (p) p.textContent = msg;
   loadingEl.classList.remove('hidden');
   loadingEl.setAttribute('aria-hidden','false');
 }
@@ -73,93 +75,154 @@ function toast(message, ms=2500){
   }, ms);
 }
 
-/* ------------------ Page detection ------------------ */
-const onLoginPage   = !!loginForm;
-const onProfilePage = !!uId || !!uLogin || !!svgXPTime || !!svgXPProject;
+/* ------------------ Mode detection ------------------ */
+const HAS_SPA_LOGIN   = !!loginView;
+const HAS_SPA_PROFILE = !!profileView;
+const SPA_MODE        = HAS_SPA_LOGIN && HAS_SPA_PROFILE;
 
-/* ------------------ Boot & Routing ------------------ */
+const ON_LOGIN_PAGE   = !!loginForm && !HAS_SPA_PROFILE;   // multi-page login
+const ON_PROFILE_PAGE = !!(uId || uLogin || svgXPTime || svgXPProject) && !HAS_SPA_LOGIN; // multi-page profile
+
+/* ------------------ SPA helpers ------------------ */
+function show(view){
+  if(!SPA_MODE) return; // no-op in multi-page
+  if(view === 'login'){
+    loginView?.classList.add('active');
+    profileView?.classList.remove('active');
+    loginView?.setAttribute('aria-hidden','false');
+    profileView?.setAttribute('aria-hidden','true');
+    if (logoutBtn) logoutBtn.hidden = true;
+  } else {
+    profileView?.classList.add('active');
+    loginView?.classList.remove('active');
+    profileView?.setAttribute('aria-hidden','false');
+    loginView?.setAttribute('aria-hidden','true');
+    if (logoutBtn) logoutBtn.hidden = false;
+  }
+}
+
+/* ------------------ Boot ------------------ */
 document.addEventListener('DOMContentLoaded', async () => {
   const token = getToken();
-  const hasJWT = !!(token && decodeJWT(token));
+  const authed = !!(token && decodeJWT(token));
 
-  // If we're on the login page and already authed → go to profile
-  if (onLoginPage) {
-    if (hasJWT) {
+  // ---- Multi-page routing
+  if (ON_LOGIN_PAGE) {
+    if (authed) {
       location.replace(PROFILE_URL);
       return;
     }
-    wireLogin();
+    wireLoginMulti();
+    return;
   }
-
-  // If we're on the profile page and not authed → go to login
-  if (onProfilePage) {
-    if (!hasJWT) {
+  if (ON_PROFILE_PAGE) {
+    if (!authed) {
       location.replace(LOGIN_URL);
       return;
     }
+    if (logoutBtn) logoutBtn.addEventListener('click', onLogoutMulti);
     startLoading('Fetching your profile…');
-    try {
-      await loadProfile();
-    } catch (err) {
-      toast(err?.message || String(err), 4000);
-    } finally {
-      stopLoading();
+    try { await loadProfile(); }
+    catch(err){ toast(err?.message || String(err), 4000); }
+    finally{ stopLoading(); }
+    return;
+  }
+
+  // ---- SPA routing
+  if (SPA_MODE) {
+    if (authed) {
+      show('profile');
+      startLoading('Fetching your profile…');
+      try { await loadProfile(); }
+      catch(err){ toast(err?.message || String(err), 4000); }
+      finally { stopLoading(); }
+    } else {
+      show('login');
     }
+
     if (logoutBtn) {
-      logoutBtn.addEventListener('click', (e) => {
-        e.preventDefault();
+      logoutBtn.addEventListener('click', () => {
         clearToken();
-        location.replace(LOGIN_URL);
+        show('login');
+        loginForm?.reset();
+        idInput?.focus();
+        toast('Logged out');
       });
+    }
+
+    if (loginForm) {
+      loginForm.addEventListener('submit', onLoginSPASubmit);
     }
   }
 });
 
-/* ------------------ Login wiring (login.html) ------------------ */
-function wireLogin(){
+/* ------------------ Multi-page handlers ------------------ */
+function onLogoutMulti(e){
+  e?.preventDefault?.();
+  clearToken();
+  location.replace(LOGIN_URL);
+}
+function wireLoginMulti(){
   if (!loginForm) return;
-
   loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (loginError) loginError.hidden = true;
-
     const identifier = idInput?.value?.trim() || '';
     const password   = pwInput?.value || '';
-
     if(!identifier || !password){
-      if(loginError){
-        loginError.textContent = 'Please enter both identifier and password.';
-        loginError.hidden = false;
-      }
+      if(loginError){ loginError.textContent = 'Please enter both identifier and password.'; loginError.hidden = false; }
       return;
     }
-
     try{
-      const submitBtn = loginForm.querySelector('button[type="submit"]');
-      if (submitBtn) submitBtn.disabled = true;
+      const btn = loginForm.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = true;
       startLoading('Signing you in…');
-
       const jwt = await signinBasic(identifier, password);
       saveToken(jwt);
-
       toast('Welcome 👋');
-      // Go to profile page
       location.replace(PROFILE_URL);
     }catch(err){
-      if(loginError){
-        loginError.textContent = err?.message || 'Sign in failed.';
-        loginError.hidden = false;
-      }
+      if(loginError){ loginError.textContent = err?.message || 'Sign in failed.'; loginError.hidden = false; }
       toast('Signin failed', 2500);
     }finally{
       stopLoading();
-      const submitBtn = loginForm.querySelector('button[type="submit"]');
-      if (submitBtn) submitBtn.disabled = false;
+      const btn = loginForm.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = false;
     }
   });
 }
 
-/* ------------------ Profile loader (profile.html) ------------------ */
+/* ------------------ SPA login handler ------------------ */
+async function onLoginSPASubmit(e){
+  e.preventDefault();
+  if (loginError) loginError.hidden = true;
+  const identifier = idInput?.value?.trim() || '';
+  const password   = pwInput?.value || '';
+  if(!identifier || !password){
+    if(loginError){ loginError.textContent = 'Please enter both identifier and password.'; loginError.hidden = false; }
+    return;
+  }
+  try{
+    const btn = loginForm.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    startLoading('Signing you in…');
+    const jwt = await signinBasic(identifier, password);
+    saveToken(jwt);
+    show('profile');
+    startLoading('Loading your data…');
+    await loadProfile();
+    toast('Welcome 👋');
+  }catch(err){
+    if(loginError){ loginError.textContent = err?.message || 'Sign in failed.'; loginError.hidden = false; }
+    toast('Signin failed', 2500);
+  }finally{
+    stopLoading();
+    const btn = loginForm.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ------------------ Profile loader (shared) ------------------ */
 let isLoadingProfile = false;
 async function loadProfile(){
   if (isLoadingProfile) return;
@@ -169,7 +232,6 @@ async function loadProfile(){
     const me = await gql(Q_ME);
     const user = me?.user?.[0];
     if(!user) throw new Error('Failed to load user.');
-
     if(uLogin) uLogin.textContent = user.login ?? '—';
     if(uEmail) uEmail.textContent = user.email ?? '—';
     if(uId)    uId.textContent    = user.id ?? '—';
@@ -261,7 +323,7 @@ async function loadProfile(){
       if (ts < prev) passDateByObj.set(oid, ts);
     });
 
-    // ---------------- Inclusion logic ----------------
+    // ---------------- Inclusion logic (same as قبل) ----------------
     // 1) Include ALL projects
     const projectIds = allObjIds.filter(oid => typeById.get(oid) === 'project');
     const includedIdsSet = new Set(projectIds);
@@ -304,12 +366,12 @@ async function loadProfile(){
       officialTotal += amt;
     });
 
-    // Display total in kB (ceil to match your current style)
+    // Display total in kB (same style you had: ceil)
     const kb = Math.ceil(officialTotal / 1000);
     if(uXP) uXP.textContent = kb + ' kB';
 
     // ---------------- Charts ----------------
-    // XP over time (cumulative)
+    // XP over time
     if (svgXPTime && noXPTime) {
       const byDay = new Map();
       officialEntries.forEach(e => {
@@ -372,10 +434,14 @@ async function loadProfile(){
   }
 }
 
-/* ------------------ Optional: resize re-render (profile only) ------------------ */
+/* ------------------ Re-render on resize (profile only) ------------------ */
 let rerenderTimer = null;
 window.addEventListener('resize', () => {
-  if (!onProfilePage) return;
+  // SPA: re-render فقط إذا كنا على الـprofile view
+  if (SPA_MODE && !profileView?.classList.contains('active')) return;
+  // Multi-page: اشتغل لو نحن بصفحة البروفايل
+  if (!SPA_MODE && !ON_PROFILE_PAGE) return;
+
   clearTimeout(rerenderTimer);
   rerenderTimer = setTimeout(() => {
     loadProfile().catch(console.error);
