@@ -1,336 +1,374 @@
-// js/app.js (variant) — visual/logic tweaks without breaking API
-import { signinBasic, saveToken, getToken, clearToken, decodeJWT, gql } from './api.js';
-import { Q_ME, Q_RESULTS_WITH_USER, Q_XP, Q_OBJECT_NAMES, Q_PASSED_OBJECTS } from './queries.js';
-import { renderLineChart, renderBarChart } from './charts.js';
+// app.js — single-file script tailored to your HTML/CSS
+// Works with: identity/password, remember, #screen-login/#screen-app UI
+// Fixes: total XP (dedup by object), audit ratio via up/down transactions,
+// charts: XP over time, pass/fail donut, XP by project type.
 
-const loginView   = document.getElementById('login-view');
-const profileView = document.getElementById('profile-view');
-const logoutBtn   = document.getElementById('logout-btn');
+// -------------------- Config --------------------
+const CFG = {
+  SIGNIN_URL: (window.__CONFIG__ && window.__CONFIG__.SIGNIN_URL) ||
+              "https://learn.reboot01.com/api/auth/signin",
+  GRAPHQL_URL: (window.__CONFIG__ && window.__CONFIG__.GRAPHQL_URL) ||
+               "https://learn.reboot01.com/api/graphql-engine/v1/graphql",
+  TOKEN_KEY: "jwt",
+};
 
-const loginForm   = document.getElementById('login-form');
-const idInput     = document.getElementById('identifier');
-const pwInput     = document.getElementById('password');
-const loginError  = document.getElementById('login-error');
+// -------------------- DOM --------------------
+const $ = (id) => document.getElementById(id);
 
-const uLogin = document.getElementById('u-login');
-const uEmail = document.getElementById('u-email');
-const uId    = document.getElementById('u-id');
-const uXP    = document.getElementById('u-xp');
+const scrLogin = $("screen-login");
+const scrApp   = $("screen-app");
+const btnLogout= $("btn-logout");
 
-const latestList   = document.getElementById('latest-results');
-const noResultsEl  = document.getElementById('no-results');
+const form     = $("login-form");
+const inpId    = $("identity");
+const inpPw    = $("password");
+const inpRem   = $("remember");
+const errEl    = $("login-error");
 
-const svgXPTime    = document.getElementById('xp-over-time');
-const noXPTime     = document.getElementById('no-xp-time');
-const svgXPProject = document.getElementById('xp-by-project');
-const noXPProject  = document.getElementById('no-xp-project');
+const heroName = $("hero-name");
+const uId      = $("u-id");
+const uLogin   = $("u-login");
+const uFirst   = $("u-first");
+const uLast    = $("u-last");
 
-const loadingEl = document.getElementById('loading');
-const toastEl   = document.getElementById('toast');
+const xpTotalEl   = $("xp-total");
+const auditRatioEl= $("audit-ratio");
+const passedEl    = $("passed-count");
+const failedEl    = $("failed-count");
 
-/* ------------------ rules (renamed for clarity) ------------------ */
-const DROP_TOKENS   = ['checkpoint', 'raid', '/audit'];
-const TAG_PISCINE   = 'piscine';
-const EXAM_TOKENS   = ['exam'];
-const EXAM_MAX_KB   = 300;
+const projectsEl  = $("projects");
 
-/* ------------------ UX helpers ------------------ */
-function show(view){
-  const toLogin = view === 'login';
-  loginView.classList.toggle('active', toLogin);
-  profileView.classList.toggle('active', !toLogin);
-  loginView.setAttribute('aria-hidden', String(!toLogin));
-  profileView.setAttribute('aria-hidden', String(toLogin));
-  logoutBtn.hidden = toLogin;
-}
+const svgXP    = $("svg-xp");
+const svgRatio = $("svg-ratio");
+const svgType  = $("svg-type");
 
-function startLoading(msg='Loading…'){
-  loadingEl.querySelector('p').textContent = msg;
-  loadingEl.classList.remove('hidden');
-  loadingEl.setAttribute('aria-hidden','false');
-}
-function stopLoading(){
-  loadingEl.classList.add('hidden');
-  loadingEl.setAttribute('aria-hidden','true');
-}
-
-let toastTimer = null;
-function toast(message, ms=2400){
-  toastEl.textContent = message;
-  toastEl.classList.remove('hidden');
-  requestAnimationFrame(()=> toastEl.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=>{
-    toastEl.classList.remove('show');
-    setTimeout(()=> toastEl.classList.add('hidden'), 220);
-  }, ms);
-}
-
+// -------------------- Helpers --------------------
 const nf = new Intl.NumberFormat();
-const fmtNum = (n)=> nf.format(n);
-const toDay  = (ts)=> new Date(ts).toISOString().slice(0,10);
-const isMobile = ()=> window.matchMedia('(max-width: 600px)').matches;
+const fmtXP = (n) => `${Math.ceil((+n || 0) / 1000)} kB`;
+const day = (ts) => new Date(ts).toISOString().slice(0,10);
 
-/* ------------------ init ------------------ */
-document.addEventListener('DOMContentLoaded', async () => {
-  if(getToken()){
-    show('profile');
-    startLoading('Fetching your profile…');
-    try { await loadProfile(); }
-    catch(err){ toast(err.message || String(err), 4000); }
-    finally{ stopLoading(); }
-  }else{
-    show('login');
-  }
-});
-
-logoutBtn.addEventListener('click', () => {
-  clearToken();
-  show('login');
-  loginForm.reset();
-  idInput.focus();
-  toast('Logged out');
-});
-
-loginForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginError.hidden = true;
-  const identifier = idInput.value.trim();
-  const password   = pwInput.value;
-
-  if(!identifier || !password){
-    loginError.textContent = 'Please enter both identifier and password.';
-    loginError.hidden = false; return;
-  }
-
-  try{
-    loginForm.querySelector('button[type="submit"]').disabled = true;
-    startLoading('Signing you in…');
-    const jwt = await signinBasic(identifier, password);
-    saveToken(jwt);
-    show('profile');
-    startLoading('Loading your data…');
-    await loadProfile();
-    toast('Welcome 👋');
-  }catch(err){
-    loginError.textContent = err.message || 'Sign in failed.';
-    loginError.hidden = false;
-    toast('Signin failed', 2400);
-  }finally{
-    stopLoading();
-    loginForm.querySelector('button[type="submit"]').disabled = false;
-  }
-});
-
-/* ------------------ loadProfile ------------------ */
-let isLoadingProfile = false;
-async function loadProfile(){
-  if (isLoadingProfile) return;
-  isLoadingProfile = true;
-  try{
-    // whoami
-    const me = await gql(Q_ME);
-    const user = me?.user?.[0];
-    if(!user) throw new Error('Failed to load user.');
-    uLogin.textContent = user.login ?? '—';
-    uEmail.textContent = user.email ?? '—';
-    uId.textContent    = user.id ?? '—';
-
-    // parallel data
-    const [xpData, passedData, feedData] = await Promise.all([
-      gql(Q_XP, { userId: user.id }),
-      gql(Q_PASSED_OBJECTS, { userId: user.id }),
-      gql(Q_RESULTS_WITH_USER)
-    ]);
-
-    // feed
-    const results = feedData?.result ?? [];
-    latestList.replaceChildren();
-    if(!results.length){
-      noResultsEl.hidden = false;
-    }else{
-      noResultsEl.hidden = true;
-      results.forEach(r => {
-        const li = document.createElement('li');
-        const left = document.createElement('span');
-        const right = document.createElement('strong');
-        left.textContent = `${new Date(r.createdAt).toLocaleDateString()} • ${r.type || 'result'} #${r.id}`;
-        right.textContent = String(r.grade);
-        li.append(left, right);
-        latestList.appendChild(li);
-      });
-    }
-
-    // raw rows
-    const txsAll       = xpData?.transaction ?? [];
-    const passedRowsAll= passedData?.progress ?? [];
-
-    if (!txsAll.length) {
-      uXP.textContent = '0 kB';
-      svgXPTime.replaceChildren(); noXPTime.hidden = false;
-      svgXPProject.replaceChildren(); noXPProject.hidden = false;
-      return;
-    }
-
-    // global exclude
-    const txs = txsAll.filter(t => {
-      const p = (t.path||'').toLowerCase();
-      return !DROP_TOKENS.some(k => p.includes(k));
-    });
-    const passedRows = passedRowsAll.filter(p => {
-      const path = (p.path||'').toLowerCase();
-      return !DROP_TOKENS.some(k => path.includes(k));
-    });
-
-    // object aggregates
-    const idsFromTx        = new Set();
-    const firstTxDateByObj = new Map();
-    const maxXPByObj       = new Map();
-    const samplePathByObj  = new Map();
-
-    txs.forEach(t => {
-      const oid = Number(t.objectId);
-      if (!Number.isFinite(oid)) return;
-      idsFromTx.add(oid);
-
-      const amt = Number(t.amount || 0);
-      if (amt > (maxXPByObj.get(oid) || 0)) maxXPByObj.set(oid, amt);
-
-      const ts = new Date(t.createdAt).getTime();
-      const prev = firstTxDateByObj.get(oid) ?? Infinity;
-      if (ts < prev) firstTxDateByObj.set(oid, ts);
-
-      if (!samplePathByObj.has(oid) && t.path) samplePathByObj.set(oid, t.path.toLowerCase());
-    });
-
-    const allObjIds = [...idsFromTx];
-
-    // object meta
-    const objMeta = allObjIds.length ? await gql(Q_OBJECT_NAMES, { ids: allObjIds }) : { object: [] };
-    const typeById       = new Map((objMeta?.object || []).map(o => [Number(o.id), (o.type || '').toLowerCase()]));
-    const rawNameById    = new Map((objMeta?.object || []).map(o => [Number(o.id), (o.name || '')]));
-    const nameLowerById  = new Map((objMeta?.object || []).map(o => [Number(o.id), (o.name || '').toLowerCase()]));
-
-    // earliest pass date
-    const passDateByObj = new Map();
-    passedRows.forEach(p => {
-      const oid = Number(p.objectId);
-      if (!Number.isFinite(oid)) return;
-      const ts = new Date(p.createdAt).getTime();
-      const prev = passDateByObj.get(oid) ?? Infinity;
-      if (ts < prev) passDateByObj.set(oid, ts);
-    });
-
-    /* ---------------- Inclusion logic ----------------
-       1) Include all projects
-       2) Include one piscine root (largest XP)
-       3) Include exam micro exercises (<= 300 bytes or 'exam' hinted)
-    --------------------------------------------------- */
-    const projectIds = allObjIds.filter(oid => typeById.get(oid) === 'project');
-    const includedIdsSet = new Set(projectIds);
-
-    const piscineCandidates = allObjIds
-      .filter(oid => {
-        const n = (nameLowerById.get(oid) || '');
-        const p = (samplePathByObj.get(oid) || '');
-        return n.includes(TAG_PISCINE) || p.includes(TAG_PISCINE);
-      })
-      .map(oid => ({ oid, amt: maxXPByObj.get(oid) || 0 }))
-      .filter(x => x.amt > 0)
-      .sort((a,b)=> b.amt - a.amt);
-    if (piscineCandidates.length) includedIdsSet.add(piscineCandidates[0].oid);
-
-    allObjIds.forEach(oid => {
-      if (includedIdsSet.has(oid)) return;
-      if (typeById.get(oid) !== 'exercise') return;
-      const amt  = maxXPByObj.get(oid) || 0;
-      const name = (nameLowerById.get(oid) || '');
-      const path = (samplePathByObj.get(oid) || '');
-      const isExam = EXAM_TOKENS.some(h => name.includes(h) || path.includes(h));
-      const isTiny = amt > 0 && amt <= EXAM_MAX_KB;
-      if (isExam || isTiny) includedIdsSet.add(oid);
-    });
-
-    const includedIds = [...includedIdsSet];
-
-    // build entries & totals
-    const officialEntries = [];
-    let officialTotal = 0;
-    includedIds.forEach(oid => {
-      const amt = maxXPByObj.get(oid) || 0;
-      if (amt <= 0) return;
-      const ts = passDateByObj.get(oid) ?? firstTxDateByObj.get(oid);
-      if (ts == null) return;
-      officialEntries.push({ objectId: oid, amount: amt, passedAt: new Date(ts).toISOString() });
-      officialTotal += amt;
-    });
-
-    const kb = Math.ceil(officialTotal / 1000);
-    uXP.textContent = kb + ' kB';
-
-    // time series (cumulative)
-    const byDay = new Map();
-    officialEntries.forEach(e => {
-      const day = toDay(e.passedAt);
-      byDay.set(day, (byDay.get(day) || 0) + e.amount);
-    });
-    const dailySorted = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
-    let running = 0;
-    const seriesTime = dailySorted.map(([d,amt]) => {
-      running += amt;
-      return { x: new Date(d).getTime(), y: running, label: `${d}: total ${fmtNum(running)} XP` };
-    });
-
-    if(seriesTime.length){
-      noXPTime.hidden = true;
-      renderLineChart(svgXPTime, seriesTime, {
-        xAccessor: d => d.x,
-        yAccessor: d => d.y,
-        titles: seriesTime.map(d => d.label),
-        yLabel: 'Cumulative XP',
-        margin: isMobile() ? { t:16, r:12, b:44, l:54 } : { t:18, r:16, b:36, l:58 }
-      });
-    } else {
-      noXPTime.hidden = false;
-      svgXPTime.replaceChildren();
-    }
-
-    // bars
-    let bars = officialEntries.map(e => ({
-      id: e.objectId,
-      name: (rawNameById.get(e.objectId) || String(e.objectId)).replace(/\bproject—|\bpiscine—/gi, ''),
-      sum: e.amount
-    }))
-    .sort((a,b)=> b.sum - a.sum)
-    .slice(0, 16);
-
-    if(bars.length){
-      noXPProject.hidden = true;
-      renderBarChart(svgXPProject, bars, {
-        xAccessor: d => d.name,
-        yAccessor: d => d.sum,
-        labelAccessor: d => d.name,
-        yLabel: 'XP',
-        margin: isMobile() ? { t:16, r:12, b:78, l:54 } : { t:18, r:16, b:60, l:58 }
-      });
-    } else {
-      noXPProject.hidden = false;
-      svgXPProject.replaceChildren();
-    }
-
-    console.debug('[XP]', 'includedIds:', includedIds.length,
-      'officialTotal:', officialTotal, 'displayKB(ceil):', kb);
-  } finally {
-    isLoadingProfile = false;
-  }
+function toggle(authed){
+  if(authed){ scrLogin.classList.add("hidden"); scrApp.classList.remove("hidden"); }
+  else { scrApp.classList.add("hidden"); scrLogin.classList.remove("hidden"); }
 }
 
-/* ------------------ resize re-render ------------------ */
-let rerenderTimer = null;
-window.addEventListener('resize', () => {
-  if (loginView.classList.contains('active')) return;
-  clearTimeout(rerenderTimer);
-  rerenderTimer = setTimeout(() => {
-    loadProfile().catch(console.error);
-  }, 200);
+function storeSet(key, val, remember){
+  (remember ? localStorage : sessionStorage).setItem(key, val);
+  // clear the other store (avoid confusion)
+  (remember ? sessionStorage : localStorage).removeItem(key);
+}
+function storeGet(key){ return localStorage.getItem(key) || sessionStorage.getItem(key); }
+function storeDel(key){ localStorage.removeItem(key); sessionStorage.removeItem(key); }
+
+function safeAtob(b64){
+  b64 = String(b64 || "").replace(/-/g,"+").replace(/_/g,"/");
+  const pad = b64.length % 4; if (pad) b64 += "=".repeat(4 - pad);
+  return atob(b64);
+}
+function decodeJWT(token){
+  try{
+    const mid = token.split(".")[1];
+    const json = safeAtob(mid);
+    return JSON.parse(decodeURIComponent(escape(json)));
+  }catch{ return null; }
+}
+
+// -------------------- HTTP/GraphQL --------------------
+async function signin(identity, password){
+  const basic = btoa(unescape(encodeURIComponent(`${identity}:${password}`)));
+  const res = await fetch(CFG.SIGNIN_URL, {
+    method: "POST",
+    headers: { "Authorization": `Basic ${basic}` }
+  });
+  const text = await res.text().catch(()=> "");
+  if(!res.ok){
+    const msg = text?.trim() || `Signin failed (${res.status})`;
+    throw new Error(msg);
+  }
+  const m = String(text).match(/[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+/);
+  if(!m) throw new Error("Signin returned no token.");
+  return m[0];
+}
+
+async function gql(query, variables={}){
+  const token = storeGet(CFG.TOKEN_KEY);
+  if(!token) throw new Error("Missing token");
+  const res = await fetch(CFG.GRAPHQL_URL, {
+    method:"POST",
+    headers:{
+      "content-type":"application/json",
+      "authorization": `Bearer ${token}`
+    },
+    body: JSON.stringify({ query, variables })
+  });
+  let body;
+  try{ body = await res.json(); }
+  catch{
+    const raw = await res.text().catch(()=> "");
+    throw new Error(raw?.trim() || `GraphQL HTTP ${res.status}`);
+  }
+  if(!res.ok) throw new Error(body?.errors?.[0]?.message || `GraphQL HTTP ${res.status}`);
+  if(body?.errors?.length) throw new Error(body.errors[0].message || "GraphQL error");
+  return body.data;
+}
+
+// -------------------- Queries --------------------
+const Q_USER = `
+query Me {
+  user { id login firstName lastName }
+}`;
+const Q_XP = `
+query XP($uid:Int!){
+  transaction(
+    where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
+    order_by:{ createdAt: asc }
+    limit: 12000
+  ){
+    amount objectId createdAt path
+    object{ id name type }
+  }
+}`;
+const Q_RESULTS = `
+query Results($uid:Int!){
+  result(
+    where:{ userId:{_eq:$uid} }
+    order_by:[{objectId: asc},{createdAt: desc}]
+    distinct_on: objectId
+  ){ objectId grade createdAt path }
+}`;
+const Q_AUDIT = `
+query AuditTx($uid:Int!){
+  transaction(
+    where:{ userId:{_eq:$uid}, type:{_in:["up","down"]}, amount:{_gt:0} }
+  ){ type amount }
+}`;
+
+// -------------------- Charts (SVG) --------------------
+function ns(tag){ return document.createElementNS("http://www.w3.org/2000/svg", tag); }
+function clear(svg){ while(svg.firstChild) svg.removeChild(svg.firstChild); }
+
+function lineChart(svg, series){
+  clear(svg);
+  const W=+svg.viewBox.baseVal.width||680,H=+svg.viewBox.baseVal.height||280;
+  const P={l:44,r:18,t:16,b:34};
+  if(!series.length){ const t=ns("text"); t.setAttribute("x",10); t.setAttribute("y",22); t.textContent="No data"; svg.appendChild(t); return; }
+  const xs=series.map(d=>d.x), ys=series.map(d=>d.y);
+  const x0=Math.min(...xs), x1=Math.max(...xs), y1=Math.max(1, ...ys), y0=0;
+  const sx=v=>P.l+((v-x0)/Math.max(1,(x1-x0)))*(W-P.l-P.r);
+  const sy=v=>H-P.b-(v/(y1-y0))*(H-P.t-P.b);
+
+  const ax=ns("path");
+  ax.setAttribute("d",`M${P.l},${H-P.b} H${W-P.r} M${P.l},${P.t} V${H-P.b}`);
+  ax.setAttribute("class","axis"); ax.setAttribute("stroke","#202a57"); svg.appendChild(ax);
+
+  let d=""; series.forEach((p,i)=>{ d+=(i?" L":"M")+sx(p.x)+" "+sy(p.y); });
+  const path=ns("path"); path.setAttribute("class","line"); path.setAttribute("d",d); svg.appendChild(path);
+  series.forEach(p=>{ const c=ns("circle"); c.setAttribute("class","dot"); c.setAttribute("r","2.8"); c.setAttribute("cx",sx(p.x)); c.setAttribute("cy",sy(p.y)); svg.appendChild(c); });
+
+  const t1=ns("text"); t1.textContent=new Date(x0).toISOString().slice(0,10); t1.setAttribute("x",P.l); t1.setAttribute("y",H-8); svg.appendChild(t1);
+  const t2=ns("text"); t2.textContent=new Date(x1).toISOString().slice(0,10); t2.setAttribute("x",W-P.r-64); t2.setAttribute("y",H-8); svg.appendChild(t2);
+  const t3=ns("text"); t3.textContent=fmtXP(y1); t3.setAttribute("x",10); t3.setAttribute("y",P.t+12); svg.appendChild(t3);
+}
+
+function donut(svg, pass, fail){
+  clear(svg);
+  const W=+svg.viewBox.baseVal.width||280,H=+svg.viewBox.baseVal.height||280;
+  const cx=W/2, cy=H/2, R=Math.min(W,H)/2-10;
+  const total=Math.max(1,pass+fail);
+  const arc=(start,val,cls)=>{
+    const a0=(start/total)*Math.PI*2-Math.PI/2, a1=((start+val)/total)*Math.PI*2-Math.PI/2;
+    const x0=cx+R*Math.cos(a0), y0=cy+R*Math.sin(a0), x1=cx+R*Math.cos(a1), y1=cy+R*Math.sin(a1);
+    const large=val/total>0.5?1:0;
+    const p=ns("path"); p.setAttribute("d",`M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} L ${cx} ${cy} Z`);
+    p.setAttribute("class",cls); svg.appendChild(p); return start+val;
+  };
+  let s=0; s=arc(s,pass,"slice-pass"); s=arc(s,fail,"slice-fail");
+  const lbl=ns("text"); lbl.textContent=`${Math.round((pass/total)*100)}% pass`; lbl.setAttribute("x",cx); lbl.setAttribute("y",cy+4); lbl.setAttribute("text-anchor","middle"); svg.appendChild(lbl);
+}
+
+function bars(svg, entries){
+  clear(svg);
+  const W=+svg.viewBox.baseVal.width||680,H=+svg.viewBox.baseVal.height||300;
+  const P={l:28,r:16,t:16,b:64};
+  if(!entries.length){ const t=ns("text"); t.setAttribute("x",10); t.setAttribute("y",22); t.textContent="No data"; svg.appendChild(t); return; }
+  const max=Math.max(1, ...entries.map(e=>e.value));
+  const band=(W-P.l-P.r)/entries.length;
+
+  const ax=ns("line"); ax.setAttribute("x1",P.l); ax.setAttribute("y1",H-P.b); ax.setAttribute("x2",W-P.r); ax.setAttribute("y2",H-P.b); ax.setAttribute("stroke","#202a57"); svg.appendChild(ax);
+
+  entries.forEach((e,i)=>{
+    const v=e.value, h=(v/max)*(H-P.t-P.b), x=P.l+i*band, y=H-P.b-h;
+    const r=ns("rect"); r.setAttribute("x",x+8); r.setAttribute("y",y); r.setAttribute("width",Math.max(10,band-16)); r.setAttribute("height",h); r.setAttribute("fill","#7aa2ff"); r.setAttribute("rx","7"); svg.appendChild(r);
+    const tx=ns("text"); tx.setAttribute("x",x+band/2); tx.setAttribute("y",H-12); tx.setAttribute("text-anchor","middle"); tx.textContent=e.label; svg.appendChild(tx);
+  });
+}
+
+// -------------------- Logic --------------------
+
+// normalize: treat piscine base differently if تبغى، هنا بنحسب الـ XP الكلي بدون استثناءات معقّدة
+// نستخدم أكبر XP لكل objectId (dedupe) حتى ما تتكرر محاولات نفس المشروع.
+function totalXPFromTransactions(rows){
+  const maxByObj=new Map();
+  for(const r of rows){
+    const oid=+r.objectId;
+    const amt=+r.amount||0;
+    if(!Number.isFinite(oid) || amt<=0) continue;
+    if(amt > (maxByObj.get(oid)||0)) maxByObj.set(oid, amt);
+  }
+  let total=0; maxByObj.forEach(v=> total+=v);
+  return { total, maxByObj };
+}
+
+function timeSeriesFrom(rows, whenByObj){
+  // whenByObj: map of objectId -> timestamp (passedAt or first tx)
+  const byDay=new Map();
+  rows.forEach(r=>{
+    const oid=+r.objectId; if(!Number.isFinite(oid)) return;
+    const when = whenByObj.get(oid) || r.createdAt;
+    const d=day(when);
+    const amt=+r.amount||0;
+    byDay.set(d,(byDay.get(d)||0)+amt);
+  });
+  // cumulative using per-day sums with dedupe rules handled by caller
+  const daily=[...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
+  let run=0;
+  return daily.map(([d,amt])=>{ run+=amt; return { x:new Date(d).getTime(), y:run }; });
+}
+
+function groupXPByType(rows){
+  const sum=new Map(); // type -> xp sum
+  rows.forEach(r=>{
+    const t=(r.object && r.object.type)||"unknown";
+    sum.set(t,(sum.get(t)||0)+(+r.amount||0));
+  });
+  return [...sum.entries()].map(([label,value])=>({label,value})).sort((a,b)=> b.value-a.value);
+}
+
+function recentProjectsList(rows, limit=9){
+  const last=rows.slice(-limit).reverse();
+  return last.map(r=>({
+    title: (r.object && r.object.name) || (r.path||"").split("/").pop() || "project",
+    meta: `${(r.createdAt||"").slice(0,10)} · ${fmtXP(r.amount)}`
+  }));
+}
+
+// -------------------- Load all --------------------
+async function loadAll(){
+  // user
+  const u = await gql(Q_USER);
+  const me = u.user && u.user[0];
+  if(!me) throw new Error("Failed to load user.");
+  uId.textContent    = me.id ?? "—";
+  uLogin.textContent = me.login ?? "—";
+  uFirst.textContent = me.firstName ?? "—";
+  uLast.textContent  = me.lastName ?? "—";
+  heroName.textContent = me.login ? `${me.login}'s profile` : "Your profile";
+
+  const uid = me.id;
+
+  // parallel data: xp tx, pass/fail (latest per object), audit up/down
+  const [xpRes, resRes, audRes] = await Promise.all([
+    gql(Q_XP, { uid }),
+    gql(Q_RESULTS, { uid }),
+    gql(Q_AUDIT, { uid }),
+  ]);
+
+  const xpRows   = xpRes.transaction || [];
+  const results  = resRes.result || [];
+  const audits   = audRes.transaction || [];
+
+  // Total XP (dedupe by objectId: take max amount per object)
+  // ونستخدم تاريخ النجاح إن وجد لخط الزمن (وإلا أول معاملة).
+  const passAtByObj=new Map();
+  results.forEach(r=>{ if(+r.grade===1){ passAtByObj.set(+r.objectId, r.createdAt); } });
+
+  // rebuild a per-object list with only max XP, and date chosen (pass date > first tx)
+  const maxByObj=new Map();
+  const firstDateByObj=new Map();
+  const sampleRowByObj=new Map();
+
+  xpRows.forEach(r=>{
+    const oid=+r.objectId; if(!Number.isFinite(oid)) return;
+    const amt=+r.amount||0; if(amt<=0) return;
+    if(amt>(maxByObj.get(oid)||0)) { maxByObj.set(oid, amt); sampleRowByObj.set(oid, r); }
+    const ts=new Date(r.createdAt).getTime();
+    const prev=firstDateByObj.get(oid) ?? Infinity;
+    if(ts<prev) firstDateByObj.set(oid, r.createdAt);
+  });
+
+  // entries for charts/lists using one row per object
+  const official = [...maxByObj.entries()].map(([oid, amt])=>{
+    const base = sampleRowByObj.get(oid);
+    const when = passAtByObj.get(oid) || firstDateByObj.get(oid) || base.createdAt;
+    return { ...base, amount: amt, createdAt: when };
+  }).sort((a,b)=> (a.createdAt>b.createdAt?1:-1));
+
+  const totalXP = official.reduce((s,r)=> s + (+r.amount||0), 0);
+  xpTotalEl.textContent = fmtXP(totalXP);
+
+  // Pass/Fail counts (latest per object)
+  const pass = results.filter(r=> +r.grade===1).length;
+  const fail = results.filter(r=> +r.grade!==1).length;
+  passedEl.textContent = String(pass);
+  failedEl.textContent = String(fail);
+
+  // Audit ratio from up/down transactions (if available)
+  let up=0, down=0;
+  audits.forEach(a=>{
+    const t=(a.type||"").toLowerCase();
+    const amt=+a.amount||0;
+    if(t==="up") up+=amt;
+    else if(t==="down") down+=amt;
+  });
+  const ratio = up+down>0 ? (up/(up+down))*100 : 0;
+  auditRatioEl.textContent = (Math.round(ratio*10)/10).toFixed(1) + "%";
+
+  // Charts
+  lineChart(svgXP, timeSeriesFrom(official, passAtByObj));
+  donut(svgRatio, pass, fail);
+  bars(svgType, groupXPByType(official));
+
+  // Recent projects
+  projectsEl.innerHTML = "";
+  recentProjectsList(official, 9).forEach(it=>{
+    const div=document.createElement("div"); div.className="item";
+    const t=document.createElement("div"); t.className="title"; t.textContent=it.title;
+    const m=document.createElement("div"); m.className="meta"; m.textContent=it.meta;
+    div.appendChild(t); div.appendChild(m); projectsEl.appendChild(div);
+  });
+}
+
+// -------------------- Events --------------------
+btnLogout.addEventListener("click", (e)=>{
+  e.preventDefault();
+  storeDel(CFG.TOKEN_KEY);
+  toggle(false);
+  errEl.classList.add("hidden");
 });
+
+form.addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  errEl.classList.add("hidden");
+  const id = inpId.value.trim();
+  const pw = inpPw.value;
+  if(!id || !pw){
+    errEl.textContent="Please enter both fields."; errEl.classList.remove("hidden"); return;
+  }
+  try{
+    const jwt = await signin(id, pw);
+    storeSet(CFG.TOKEN_KEY, jwt, !!inpRem.checked);
+    toggle(true);
+    await loadAll();
+  }catch(err){
+    errEl.textContent = err?.message || "Signin failed.";
+    errEl.classList.remove("hidden");
+  }
+});
+
+// -------------------- Boot --------------------
+(function init(){
+  const jwt = storeGet(CFG.TOKEN_KEY);
+  const ok = jwt && decodeJWT(jwt);
+  if(ok){ toggle(true); loadAll().catch(e=>{ errEl.textContent = e?.message || String(e); errEl.classList.remove("hidden"); }); }
+  else { toggle(false); }
+})();
