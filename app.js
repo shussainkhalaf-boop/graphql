@@ -1,4 +1,5 @@
-// app.js — fixes Total XP & Audit ratio (sum-up), updates charts accordingly
+// app.js — Total XP = sum(max XP per PASSED object), Audit ratio = sum(up)/sum(down)
+// Uses your page IDs: login, profile, stats, charts, projects, etc.
 
 // -------------------- Config --------------------
 const CFG = {
@@ -40,9 +41,8 @@ const svgRatio = $("svg-ratio");
 const svgType  = $("svg-type");
 
 // -------------------- Helpers --------------------
-const nf = new Intl.NumberFormat();
-const fmtXP = (n) => `${Math.ceil((+n || 0) / 1000)} kB`;
-const day = (ts) => new Date(ts).toISOString().slice(0,10);
+const fmtKB = (bytes) => `${Math.ceil((+bytes || 0) / 1000)} kB`;
+const day   = (ts) => new Date(ts).toISOString().slice(0,10);
 
 function toggle(authed){
   if(authed){ scrLogin.classList.add("hidden"); scrApp.classList.remove("hidden"); }
@@ -113,6 +113,7 @@ const Q_USER = `
 query Me {
   user { id login firstName lastName }
 }`;
+
 const Q_XP = `
 query XP($uid:Int!){
   transaction(
@@ -124,6 +125,7 @@ query XP($uid:Int!){
     object{ id name type }
   }
 }`;
+
 const Q_RESULTS = `
 query Results($uid:Int!){
   result(
@@ -132,6 +134,7 @@ query Results($uid:Int!){
     distinct_on: objectId
   ){ objectId grade createdAt path }
 }`;
+
 const Q_AUDIT = `
 query AuditTx($uid:Int!){
   transaction(
@@ -163,7 +166,7 @@ function lineChart(svg, series){
 
   const t1=ns("text"); t1.textContent=new Date(x0).toISOString().slice(0,10); t1.setAttribute("x",P.l); t1.setAttribute("y",H-8); svg.appendChild(t1);
   const t2=ns("text"); t2.textContent=new Date(x1).toISOString().slice(0,10); t2.setAttribute("x",W-P.r-64); t2.setAttribute("y",H-8); svg.appendChild(t2);
-  const t3=ns("text"); t3.textContent=fmtXP(y1); t3.setAttribute("x",10); t3.setAttribute("y",P.t+12); svg.appendChild(t3);
+  const t3=ns("text"); t3.textContent=fmtKB(y1); t3.setAttribute("x",10); t3.setAttribute("y",P.t+12); svg.appendChild(t3);
 }
 
 function donut(svg, pass, fail){
@@ -199,43 +202,108 @@ function bars(svg, entries){
   });
 }
 
-// -------------------- Aggregations (fixed logic) --------------------
+// -------------------- Aggregations (PASSED-only, max per object) --------------------
 
-// Total XP = sum of ALL xp transactions (amount>0), no dedupe per object.
-function sumTotalXP(rows){
-  let total = 0;
-  for(const r of rows){ total += (+r.amount || 0); }
-  return total;
+// Build PASSED set and pass date per object from latest results
+function extractPassInfo(results){
+  const passedIds = new Set();
+  const passDateByObj = new Map();
+  for(const r of results){
+    const oid = +r.objectId;
+    if(!Number.isFinite(oid)) continue;
+    if(+r.grade === 1){
+      passedIds.add(oid);
+      // createdAt هنا هو آخر نتيجة؛ نستخدمها كتاريخ النجاح
+      if (!passDateByObj.has(oid)) passDateByObj.set(oid, r.createdAt);
+    }
+  }
+  return { passedIds, passDateByObj };
 }
 
-// Time series: sum per day (no dedupe), then cumulative.
-function seriesFromRows(rows){
-  const byDay = new Map();
-  for(const r of rows){
-    const d = day(r.createdAt);
-    byDay.set(d, (byDay.get(d) || 0) + (+r.amount || 0));
+// Total XP = sum of MAX amount per PASSED object
+function totalPassedXP(xpRows, passedIds){
+  const maxByObj = new Map();
+  for(const r of xpRows){
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if (!Number.isFinite(oid) || amt <= 0) continue;
+    if (!passedIds.has(oid)) continue;
+    if (amt > (maxByObj.get(oid) || 0)) maxByObj.set(oid, amt);
   }
+  let total = 0; maxByObj.forEach(v => total += v);
+  return { total, maxByObj };
+}
+
+// Time series (cumulative) using PASSED objects only, amount = max per object, date = pass date (fallback to first tx)
+function passedSeries(xpRows, passedIds, passDateByObj){
+  const firstTxByObj = new Map();
+  for(const r of xpRows){
+    const oid = +r.objectId;
+    if(!passedIds.has(oid)) continue;
+    const ts = r.createdAt;
+    const prev = firstTxByObj.get(oid) ?? "9999-12-31T00:00:00Z";
+    if (ts < prev) firstTxByObj.set(oid, ts);
+  }
+
+  // pick date: pass date if exists else first tx
+  const amountByObj = new Map();
+  for(const r of xpRows){
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if(!passedIds.has(oid) || amt<=0) continue;
+    if (amt > (amountByObj.get(oid) || 0)) amountByObj.set(oid, amt);
+  }
+
+  const byDay = new Map();
+  for(const [oid, amt] of amountByObj){
+    const when = passDateByObj.get(oid) || firstTxByObj.get(oid);
+    const d = day(when);
+    byDay.set(d, (byDay.get(d) || 0) + amt);
+  }
+
   const daily = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
   let run = 0;
   return daily.map(([d,amt]) => { run += amt; return { x: new Date(d).getTime(), y: run }; });
 }
 
-// XP by project type: sum amounts grouped by object.type
-function groupByType(rows){
-  const sum = new Map();
-  for(const r of rows){
+// XP by type based on PASSED objects only (max per object)
+function passedByType(xpRows, passedIds){
+  const maxByObj = new Map();
+  const typeByObj = new Map();
+  for(const r of xpRows){
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if(!passedIds.has(oid) || amt<=0) continue;
+    if (amt > (maxByObj.get(oid) || 0)) maxByObj.set(oid, amt);
     const t = (r.object && r.object.type) || "unknown";
-    sum.set(t, (sum.get(t) || 0) + (+r.amount || 0));
+    if(!typeByObj.has(oid)) typeByObj.set(oid, t);
+  }
+  const sum = new Map(); // type -> sum
+  for(const [oid, amt] of maxByObj){
+    const t = typeByObj.get(oid) || "unknown";
+    sum.set(t, (sum.get(t) || 0) + amt);
   }
   return [...sum.entries()].map(([label,value])=>({label,value}))
                            .sort((a,b)=> b.value - a.value);
 }
 
-// Recent projects: last N transactions (most recent first)
-function recentList(rows, limit=9){
-  return rows.slice(-limit).reverse().map(r => ({
-    title: (r.object && r.object.name) || (r.path||"").split("/").pop() || "project",
-    meta: `${(r.createdAt||"").slice(0,10)} · ${fmtXP(r.amount)}`
+// Recent projects: from PASSED objects (sorted by pass date desc), value = max XP
+function recentPassed(xpRows, passedIds, passDateByObj, limit=9){
+  // Build max amount & sample meta per object
+  const maxByObj = new Map();
+  const sampleByObj = new Map();
+  for(const r of xpRows){
+    const oid = +r.objectId, amt = +r.amount || 0;
+    if(!passedIds.has(oid) || amt<=0) continue;
+    if (amt > (maxByObj.get(oid) || 0)) { maxByObj.set(oid, amt); sampleByObj.set(oid, r); }
+  }
+  // Compose entries with pass date
+  const items = [...maxByObj.entries()].map(([oid, amt])=>{
+    const s = sampleByObj.get(oid);
+    const title = (s.object && s.object.name) || (s.path||"").split("/").pop() || `#${oid}`;
+    const when  = passDateByObj.get(oid) || s.createdAt;
+    return { title, date: when, amount: amt };
+  }).sort((a,b)=> (a.date < b.date ? 1 : -1));
+  return items.slice(0, limit).map(it => ({
+    title: it.title,
+    meta: `${(it.date||"").slice(0,10)} · ${fmtKB(it.amount)}`
   }));
 }
 
@@ -264,17 +332,20 @@ async function loadAll(){
   const results  = resRes.result || [];
   const audits   = audRes.transaction || [];
 
-  // ---- FIXED: Total XP (sum of all xp transactions) ----
-  const totalXP = sumTotalXP(xpRows);
-  xpTotalEl.textContent = fmtXP(totalXP);
+  // --- Pass info ---
+  const { passedIds, passDateByObj } = extractPassInfo(results);
 
-  // Pass/Fail counts (latest per object via distinct_on)
-  const pass = results.filter(r=> +r.grade===1).length;
-  const fail = results.filter(r=> +r.grade!==1).length;
+  // --- Total XP (fixed): sum of max XP per PASSED object only ---
+  const { total } = totalPassedXP(xpRows, passedIds);
+  xpTotalEl.textContent = fmtKB(total);
+
+  // --- Pass / Fail counts (from latest per object) ---
+  const pass = results.filter(r => +r.grade === 1).length;
+  const fail = results.filter(r => +r.grade !== 1).length;
   passedEl.textContent = String(pass);
   failedEl.textContent = String(fail);
 
-  // ---- FIXED: Audit ratio = sum(up) / sum(down) ----
+  // --- Audit ratio (fixed): sum(up) / sum(down) ---
   let up=0, down=0;
   audits.forEach(a=>{
     const t=(a.type||"").toLowerCase();
@@ -282,20 +353,23 @@ async function loadAll(){
     if(t==="up") up+=amt;
     else if(t==="down") down+=amt;
   });
-  let ratioText = "—";
+  let ratioText = "0.00";
   if (down > 0) ratioText = (up / down).toFixed(2);
   else if (up > 0) ratioText = "∞";
-  else ratioText = "0.00";
   auditRatioEl.textContent = ratioText;
 
-  // Charts (use new logic)
-  lineChart(svgXP, seriesFromRows(xpRows));
-  donut(svgRatio, pass, fail);
-  bars(svgType, groupByType(xpRows));
+  // --- Charts: based on PASSED-only, max-per-object ---
+  const series = passedSeries(xpRows, passedIds, passDateByObj);
+  lineChart(svgXP, series);
 
-  // Recent projects
+  donut(svgRatio, pass, fail);
+
+  const byType = passedByType(xpRows, passedIds);
+  bars(svgType, byType);
+
+  // --- Recent projects: PASSED only ---
   projectsEl.innerHTML = "";
-  recentList(xpRows, 9).forEach(it=>{
+  recentPassed(xpRows, passedIds, passDateByObj, 9).forEach(it=>{
     const div=document.createElement("div"); div.className="item";
     const t=document.createElement("div"); t.className="title"; t.textContent=it.title;
     const m=document.createElement("div"); m.className="meta"; m.textContent=it.meta;
