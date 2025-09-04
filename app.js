@@ -1,214 +1,410 @@
-// js/charts.js (variant) — same public API, different styling/values
+// js/app.js — fixes Total XP + graphs, works with your js/ structure
+// Module-only XP = All XP − Piscine (BUT keeps piscine-js inside module)
 
-const fmtInt   = new Intl.NumberFormat().format;
-const fmtShort = (n) => {
-  const a = Math.abs(n);
-  if (a >= 1e9) return (n/1e9).toFixed(1).replace(/\.0$/,'')+'B';
-  if (a >= 1e6) return (n/1e6).toFixed(1).replace(/\.0$/,'')+'M';
-  if (a >= 1e3) return (n/1e3).toFixed(1).replace(/\.0$/,'')+'k';
-  return String(n);
+// ---------- Config ----------
+const CFG = {
+  SIGNIN_URL:
+    (window.__CONFIG__ && window.__CONFIG__.SIGNIN_URL) ||
+    "https://learn.reboot01.com/api/auth/signin",
+  GRAPHQL_URL:
+    (window.__CONFIG__ && window.__CONFIG__.GRAPHQL_URL) ||
+    "https://learn.reboot01.com/api/graphql-engine/v1/graphql",
+  TOKEN_KEY: "reboot01.jwt",
 };
-const fmtDate  = (ts) => { try { return new Date(ts).toLocaleDateString(undefined,{month:'short',day:'2-digit'}); } catch { return String(ts); } };
 
-function ensureTooltip() {
-  let t = document.getElementById('chart-tooltip');
-  if (!t) {
-    t = document.createElement('div');
-    t.id = 'chart-tooltip';
-    Object.assign(t.style, {
-      position:'fixed', left:'0', top:'0', transform:'translate(-50%, calc(-100% - 10px))',
-      background:'rgba(17,22,35,.96)', color:'#e8eef2', padding:'6px 8px',
-      border:'1px solid rgba(255,255,255,.08)', borderRadius:'8px',
-      fontSize:'12px', pointerEvents:'none', zIndex:'100',
-      boxShadow:'0 10px 28px rgba(0,0,0,.34)', opacity:'0', transition:'opacity .12s ease'
-    });
-    document.body.appendChild(t);
+// ---------- DOM helpers ----------
+const byId = (id) => document.getElementById(id);
+const fmtXP = (n) => (n == null ? "—" : `${Math.round(n / 1000).toLocaleString()} XP`);
+const lastSeg = (p = "") => p.split("/").filter(Boolean).pop() || "unknown";
+
+function toggleScreens(authed) {
+  const login = byId("screen-login");
+  const app = byId("screen-app");
+  if (!login || !app) return;
+  if (authed) {
+    login.classList.add("hidden");
+    app.classList.remove("hidden");
+  } else {
+    app.classList.add("hidden");
+    login.classList.remove("hidden");
   }
-  return t;
-}
-const tooltip = ensureTooltip();
-const showTip = (html, x, y) => { tooltip.innerHTML = html; tooltip.style.left = x+'px'; tooltip.style.top = y+'px'; tooltip.style.opacity = '1'; };
-const hideTip = () => { tooltip.style.opacity = '0'; };
-
-function niceExtent(min, max) {
-  if (!isFinite(min) || !isFinite(max)) return [0,1];
-  if (min === max) { const pad = Math.abs(min) || 1; return [min - pad*0.5, max + pad*0.5]; }
-  return [min, max];
-}
-function scaleLinear([d0,d1], [r0,r1]){ const m = (d1-d0)===0 ? 0 : (r1-r0)/(d1-d0); return v => r0 + (v-d0)*m; }
-function scaleBand(domain, [r0,r1], padding=0.14){ const n=Math.max(1,domain.length), step=(r1-r0)/(n+padding*2); return { bandwidth:step, pos:i=> r0 + step*(padding + i) }; }
-
-function niceTicks(min, max, count=5){
-  if (!(isFinite(min) && isFinite(max)) || count < 1) return [];
-  if (min === max) return [min];
-  const span = max - min;
-  const step0 = Math.pow(10, Math.floor(Math.log10(span / count)));
-  const err = (span / count) / step0;
-  const step = err >= 7.5 ? step0*10 : err >= 3.5 ? step0*5 : err >= 1.5 ? step0*2 : step0;
-  const start = Math.ceil(min/step)*step;
-  const stop  = Math.floor(max/step)*step;
-  const out = [];
-  for (let v = start; v <= stop + 1e-9; v += step) out.push(+v.toFixed(12));
-  return out;
 }
 
-function clearSVG(svg){ while (svg.firstChild) svg.removeChild(svg.firstChild); }
-function el(svg, type, attrs={}){ const n=document.createElementNS('http://www.w3.org/2000/svg', type); for(const[k,v] of Object.entries(attrs)) n.setAttribute(k,String(v)); svg.appendChild(n); return n; }
-function addTitle(node, text){ const t=document.createElementNS('http://www.w3.org/2000/svg','title'); t.textContent = String(text ?? ''); node.appendChild(t); }
-function sizeOf(svg, W=640, H=240){ return [ svg.clientWidth || Number(svg.getAttribute('width')) || W, Number(svg.getAttribute('height')) || svg.clientHeight || H ]; }
-
-function animatePathDraw(path, ms=820){ const L = path.getTotalLength?.() ?? 0; if(!L) return; path.setAttribute('stroke-dasharray', L); path.setAttribute('stroke-dashoffset', L); requestAnimationFrame(()=>{ path.style.transition = `stroke-dashoffset ${ms}ms ease`; path.setAttribute('stroke-dashoffset', '0'); }); }
-function animateBarGrow(rect, yFrom, hFrom, yTo, hTo, ms=500){ rect.setAttribute('y', yFrom); rect.setAttribute('height', hFrom); requestAnimationFrame(()=>{ rect.style.transition = `y ${ms}ms ease, height ${ms}ms ease`; rect.setAttribute('y', yTo); rect.setAttribute('height', Math.max(0, hTo)); }); }
-
-// Public API
-export function renderLineChart(svg, data, {
-  xAccessor,
-  yAccessor,
-  titles,
-  yLabel,
-  xIsTime = true,
-  margin = { t: 18, r: 16, b: 36, l: 50 }
-} = {}) {
-  clearSVG(svg);
-  if (!Array.isArray(data) || !data.length || !xAccessor || !yAccessor) return;
-
-  const [W,H] = sizeOf(svg);
-  const innerW = Math.max(0, W - margin.l - margin.r);
-  const innerH = Math.max(0, H - margin.t - margin.b);
-  if (innerW === 0 || innerH === 0) return;
-
-  const xs = data.map(xAccessor);
-  const ys = data.map(yAccessor);
-  const [x0,x1] = niceExtent(Math.min(...xs), Math.max(...xs));
-  const [y0,y1] = niceExtent(Math.min(...ys, 0), Math.max(...ys));
-  const sx = scaleLinear([x0,x1], [margin.l, margin.l + innerW]);
-  const sy = scaleLinear([y0,y1], [margin.t + innerH, margin.t]);
-
-  el(svg,'rect',{ x:margin.l, y:margin.t, width:innerW, height:innerH, fill:'none', stroke:'#23293c' });
-
-  const yTicks = niceTicks(y0, y1, 5);
-  yTicks.forEach(v=>{
-    const y = sy(v);
-    el(svg,'line',{ x1:margin.l, y1:y, x2:margin.l+innerW, y2:y, stroke:'#23293c' });
-    const txt = el(svg,'text',{ x: margin.l - 8, y: y + 3, 'text-anchor':'end', 'font-size':'10', fill:'#9aa8b5' });
-    txt.textContent = fmtShort(v);
-  });
-
-  const xTicksCount = Math.min(6, Math.max(2, Math.floor(innerW / 110)));
-  const xTicks = niceTicks(x0, x1, xTicksCount);
-  xTicks.forEach(v=>{
-    const x = sx(v);
-    el(svg,'line',{ x1:x, y1:margin.t, x2:x, y2:margin.t+innerH, stroke:'rgba(255,255,255,0.05)' });
-    const txt = el(svg,'text',{ x, y: margin.t + innerH + 14, 'text-anchor':'middle', 'font-size':'10', fill:'#9aa8b5' });
-    txt.textContent = xIsTime ? fmtDate(v) : fmtShort(v);
-  });
-
-  if (yLabel) {
-    const t = el(svg,'text',{ x: margin.l - 34, y: margin.t + innerH/2, 'text-anchor':'middle', 'font-size':'11', fill:'#9aa8b5', transform:`rotate(-90 ${margin.l - 34} ${margin.t + innerH/2})` });
-    t.textContent = yLabel;
+function readJwtPayload(token) {
+  try {
+    const mid = token.split(".")[1];
+    const json = atob(mid.replace(/-/g, "+").replace(/_/g, "/"));
+    return JSON.parse(decodeURIComponent(escape(json)));
+  } catch {
+    return null;
   }
+}
 
-  const gid = 'grad-' + Math.random().toString(36).slice(2,8);
-  const defs = el(svg,'defs');
-  const grad = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-  grad.setAttribute('id', gid); grad.setAttribute('x1','0'); grad.setAttribute('y1','0'); grad.setAttribute('x2','0'); grad.setAttribute('y2','1');
-  const s1 = document.createElementNS(grad.namespaceURI, 'stop'); s1.setAttribute('offset','0%');   s1.setAttribute('stop-color','#7fb0ff'); s1.setAttribute('stop-opacity','0.35');
-  const s2 = document.createElementNS(grad.namespaceURI, 'stop'); s2.setAttribute('offset','100%'); s2.setAttribute('stop-color','#7fb0ff'); s2.setAttribute('stop-opacity','0.02');
-  grad.append(s1, s2); defs.appendChild(grad);
+// ---------- GraphQL helpers ----------
+async function gql(query, variables = {}) {
+  // لو عندك window.API.gql في api.js بيتم استخدامه
+  if (window.API && typeof window.API.gql === "function") {
+    return window.API.gql(query, variables);
+  }
+  const token =
+    localStorage.getItem(CFG.TOKEN_KEY) || sessionStorage.getItem(CFG.TOKEN_KEY) || "";
+  const res = await fetch(CFG.GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: token ? `Bearer ${token}` : "",
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`GraphQL ${res.status}: ${txt.slice(0, 180)}`);
+  }
+  const data = await res.json();
+  if (data.errors?.length) throw new Error(data.errors.map((e) => e.message).join("; "));
+  return data.data;
+}
 
-  const pts = data.map(p => [ sx(xAccessor(p)), sy(yAccessor(p)) ]);
-  let d = '';
-  for (let i=0;i<pts.length;i++){
-    const [x,y] = pts[i];
-    if (i===0) d += `M${x},${y}`;
+async function signin(identity, password) {
+  // لو عندك window.API.signin في api.js بيتم استخدامه
+  if (window.API && typeof window.API.signin === "function") {
+    return window.API.signin(identity, password);
+  }
+  const basic = btoa(`${identity}:${password}`);
+  const res = await fetch(CFG.SIGNIN_URL, {
+    method: "POST",
+    headers: { authorization: `Basic ${basic}` },
+  });
+  if (res.status === 401) throw new Error("Invalid credentials");
+  if (!res.ok) throw new Error(`Signin failed (${res.status})`);
+  let token = res.headers.get("authorization") || "";
+  if (!token) {
+    const body = await res.text().catch(() => "");
+    const m = body.match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+    token = m ? m[0] : "";
+  }
+  if (!token) throw new Error("Token not found");
+  localStorage.setItem(CFG.TOKEN_KEY, token);
+  return token;
+}
+
+// ---------- Queries ----------
+const Q = {
+  USER: `query { user { id login } }`,
+  XP: `
+    query XP($uid:Int!){
+      transaction(
+        where:{ userId:{_eq:$uid}, type:{_eq:"xp"}, amount:{_gt:0} }
+        order_by:{ createdAt: asc }
+      ){
+        amount createdAt path object{ name type }
+      }
+    }`,
+  RESULTS_LATEST: `
+    query ResultsLatest($uid:Int!){
+      result(
+        where:{ userId:{_eq:$uid} }
+        order_by:[{objectId: asc},{createdAt: desc}]
+        distinct_on: objectId
+      ){ objectId grade createdAt path }
+    }`,
+};
+
+// لو عندك window.Queries (من queries.js) استخدمه بداله
+const Queries = window.Queries || Q;
+
+// ---------- XP classification ----------
+const RX_PISCINE_JS = /piscine-js/i; // يُحتسب ضمن module
+const RX_PISCINE_ONLY = /piscine(?!-js)/i; // يُستثنى من module
+
+function classifyPath(path = "") {
+  if (RX_PISCINE_JS.test(path)) return "piscine-js";
+  if (RX_PISCINE_ONLY.test(path)) return "piscine";
+  return "module";
+}
+
+function computeXpTotals(rows) {
+  let all = 0,
+    piscine = 0,
+    piscineJs = 0,
+    module = 0;
+  for (const r of rows) {
+    const amt = +r.amount || 0;
+    const kind = classifyPath(r.path || "");
+    all += amt;
+    if (kind === "piscine") piscine += amt;
     else {
-      const [px,py] = pts[i-1];
-      const mx = (x + px)/2;
-      d += ` Q${px},${py} ${mx},${(py+y)/2} T${x},${y}`;
+      module += amt;
+      if (kind === "piscine-js") piscineJs += amt;
     }
   }
-  const path = el(svg,'path',{ d, fill:'none', stroke:'#7fb0ff', 'stroke-width':2.1 });
-  animatePathDraw(path, 860);
+  return { all, piscine, piscineJs, module };
+}
 
-  const areaD = `${d} L ${margin.l + innerW},${margin.t + innerH} L ${margin.l},${margin.t + innerH} Z`;
-  el(svg,'path',{ d: areaD, fill:`url(#${gid})`, opacity:'0.95' });
-
-  const hitR = Math.max(12, Math.min(24, innerW / Math.max(6, data.length)));
-  data.forEach((p,i)=>{
-    const x = sx(xAccessor(p));
-    const y = sy(yAccessor(p));
-    const dot = el(svg,'circle',{ cx:x, cy:y, r:3.2, fill:'#7fb0ff' });
-    addTitle(dot, titles?.[i] ?? `${xIsTime ? fmtDate(xAccessor(p)) : xAccessor(p)} • ${fmtInt(yAccessor(p))}`);
-    const hot = el(svg,'circle',{ cx:x, cy:y, r:hitR, fill:'transparent' });
-    hot.addEventListener('pointerenter', (e)=> showTip(`<strong>${xIsTime ? fmtDate(xAccessor(p)) : xAccessor(p)}</strong><br>${fmtInt(yAccessor(p))}`, e.clientX, e.clientY));
-    hot.addEventListener('pointermove', (e)=> showTip(tooltip.innerHTML, e.clientX, e.clientY));
-    hot.addEventListener('pointerleave', hideTip);
+function accumulateByDate(rows) {
+  const byDay = new Map();
+  for (const r of rows) {
+    const d = (r.createdAt || "").slice(0, 10);
+    const amt = +r.amount || 0;
+    const k = classifyPath(r.path || "");
+    const entry = byDay.get(d) || { all: 0, module: 0 };
+    entry.all += amt;
+    entry.module += k === "piscine" ? 0 : amt;
+    byDay.set(d, entry);
+  }
+  const days = [...byDay.keys()].sort();
+  let ca = 0,
+    cm = 0;
+  return days.map((d) => {
+    const v = byDay.get(d);
+    ca += v.all;
+    cm += v.module;
+    return { date: d, all: ca, module: cm };
   });
 }
 
-export function renderBarChart(svg, data, {
-  xAccessor,
-  yAccessor,
-  labelAccessor = xAccessor,
-  yLabel,
-  margin = { t: 18, r: 16, b: 64, l: 50 }
-} = {}) {
-  clearSVG(svg);
-  if (!Array.isArray(data) || !data.length || !xAccessor || !yAccessor) return;
+function groupLastProjects(rows, limit = 12) {
+  return rows.slice(-limit).map((r) => ({
+    label: r.object?.name || lastSeg(r.path || ""),
+    value: +r.amount || 0,
+  }));
+}
 
-  const [W,H] = sizeOf(svg);
-  const innerW = Math.max(0, W - margin.l - margin.r);
-  const innerH = Math.max(0, H - margin.t - margin.b);
-  if (innerW === 0 || innerH === 0) return;
-
-  const ys = data.map(yAccessor);
-  const [y0,y1] = niceExtent(0, Math.max(...ys));
-  const sy = scaleLinear([y0,y1], [margin.t + innerH, margin.t]);
-
-  const domain = data.map((_, i) => i);
-  const band = scaleBand(domain, [margin.l, margin.l + innerW], 0.12);
-
-  el(svg,'rect',{ x:margin.l, y:margin.t, width:innerW, height:innerH, fill:'none', stroke:'#23293c' });
-  const yTicks = niceTicks(y0, y1, 5);
-  yTicks.forEach(v=>{
-    const y = sy(v);
-    el(svg,'line',{ x1:margin.l, y1:y, x2:margin.l+innerW, y2:y, stroke:'#23293c' });
-    const txt = el(svg,'text',{ x: margin.l - 8, y: y + 3, 'text-anchor':'end', 'font-size':'10', fill:'#9aa8b5' });
-    txt.textContent = fmtShort(v);
-  });
-
-  if (yLabel) {
-    const t = el(svg,'text',{ x: margin.l - 34, y: margin.t + innerH/2, 'text-anchor':'middle', 'font-size':'11', fill:'#9aa8b5', transform:`rotate(-90 ${margin.l - 34} ${margin.t + innerH/2})` });
-    t.textContent = yLabel;
-  }
-
-  const rotateLabels = data.length > 8 ? -28 : 0;
-  data.forEach((d,i)=>{
-    const x = band.pos(i);
-    const v = yAccessor(d);
-    const y = sy(v);
-    const h = (margin.t + innerH) - y;
-
-    const rect = el(svg,'rect',{ x, y: margin.t + innerH, width: band.bandwidth*0.9, height: 0, fill:'#7fb0ff' });
-    animateBarGrow(rect, margin.t + innerH, 0, y, h, 500);
-
-    if (h > 16) {
-      el(svg,'text', { x: x + band.bandwidth*0.45, y: y + 12, 'text-anchor':'middle', 'font-size':'10', fill:'#00142b', opacity:'0.95', fontWeight:'700' })
-        .textContent = fmtShort(v);
-    } else {
-      el(svg,'text', { x: x + band.bandwidth*0.45, y: y - 4, 'text-anchor':'middle', 'font-size':'10', fill:'#9aa8b5' })
-        .textContent = fmtShort(v);
+// ---------- Charts (from charts.js if present) ----------
+const Charts = window.Charts || {
+  lineChart: (sel, series) => {
+    const ns = (t) => document.createElementNS("http://www.w3.org/2000/svg", t);
+    const svg = document.querySelector(sel);
+    if (!svg) return;
+    svg.innerHTML = "";
+    const W = svg.viewBox.baseVal.width || 640,
+      H = svg.viewBox.baseVal.height || 260;
+    const P = { l: 38, r: 16, t: 16, b: 30 };
+    if (!series.length) {
+      const t = ns("text");
+      t.setAttribute("x", 8);
+      t.setAttribute("y", 18);
+      t.textContent = "No data";
+      svg.appendChild(t);
+      return;
     }
+    const xs = series.map((d) => new Date(d.date + "T00:00:00Z").getTime());
+    const ys = series.map((d) => d.module);
+    const xMin = Math.min(...xs),
+      xMax = Math.max(...xs);
+    const yMax = Math.max(1, ...ys);
+    const x = (v) => P.l + ((v - xMin) / Math.max(1, xMax - xMin)) * (W - P.l - P.r);
+    const y = (v) => H - P.b - (v / yMax) * (H - P.t - P.b);
+    const ax = ns("path");
+    ax.setAttribute("d", `M${P.l},${H - P.b} H${W - P.r} M${P.l},${P.t} V${H - P.b}`);
+    ax.setAttribute("class", "axis");
+    ax.setAttribute("stroke", "#26335f");
+    svg.appendChild(ax);
+    let d = "";
+    series.forEach((p, i) => {
+      d += (i ? " L" : "M") + x(new Date(p.date + "T00:00:00Z").getTime()) + " " + y(p.module);
+    });
+    const path = ns("path");
+    path.setAttribute("class", "line");
+    path.setAttribute("d", d);
+    svg.appendChild(path);
+    series.forEach((p) => {
+      const c = ns("circle");
+      c.setAttribute("class", "dot");
+      c.setAttribute("r", "2.6");
+      c.setAttribute("cx", x(new Date(p.date + "T00:00:00Z").getTime()));
+      c.setAttribute("cy", y(p.module));
+      svg.appendChild(c);
+    });
+    const t1 = ns("text");
+    t1.textContent = new Date(xMin).toISOString().slice(0, 10);
+    t1.setAttribute("x", P.l);
+    t1.setAttribute("y", H - 6);
+    svg.appendChild(t1);
+    const t2 = ns("text");
+    t2.textContent = new Date(xMax).toISOString().slice(0, 10);
+    t2.setAttribute("x", W - P.r - 64);
+    t2.setAttribute("y", H - 6);
+    svg.appendChild(t2);
+    const t3 = ns("text");
+    t3.textContent = fmtXP(yMax);
+    t3.setAttribute("x", 8);
+    t3.setAttribute("y", P.t + 12);
+    svg.appendChild(t3);
+  },
+  donut: (sel, pass, fail) => {
+    const ns = (t) => document.createElementNS("http://www.w3.org/2000/svg", t);
+    const svg = document.querySelector(sel);
+    if (!svg) return;
+    svg.innerHTML = "";
+    const W = svg.viewBox.baseVal.width || 220,
+      H = svg.viewBox.baseVal.height || 140;
+    const cx = W / 2,
+      cy = H / 2,
+      R = Math.min(W, H) / 2 - 8;
+    const total = Math.max(1, pass + fail);
+    const arc = (start, val, cls) => {
+      const a0 = (start / total) * Math.PI * 2 - Math.PI / 2;
+      const a1 = ((start + val) / total) * Math.PI * 2 - Math.PI / 2;
+      const x0 = cx + R * Math.cos(a0),
+        y0 = cy + R * Math.sin(a0);
+      const x1 = cx + R * Math.cos(a1),
+        y1 = cy + R * Math.sin(a1);
+      const large = val / total > 0.5 ? 1 : 0;
+      const p = ns("path");
+      p.setAttribute("d", `M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} L ${cx} ${cy} Z`);
+      p.setAttribute("class", cls);
+      svg.appendChild(p);
+      return start + val;
+    };
+    let s = 0;
+    s = arc(s, pass, "slice-pass");
+    s = arc(s, fail, "slice-fail");
+    const lbl = ns("text");
+    lbl.textContent = `${Math.round((pass / total) * 100)}% pass`;
+    lbl.setAttribute("x", cx);
+    lbl.setAttribute("y", cy + 4);
+    lbl.setAttribute("text-anchor", "middle");
+    svg.appendChild(lbl);
+  },
+  bars: (sel, data) => {
+    const ns = (t) => document.createElementNS("http://www.w3.org/2000/svg", t);
+    const svg = document.querySelector(sel);
+    if (!svg) return;
+    svg.innerHTML = "";
+    const W = svg.viewBox.baseVal.width || 640,
+      H = svg.viewBox.baseVal.height || 260;
+    const P = { l: 26, r: 14, t: 14, b: 36 };
+    if (!data.length) {
+      const t = ns("text");
+      t.setAttribute("x", 8);
+      t.setAttribute("y", 18);
+      t.textContent = "No data";
+      svg.appendChild(t);
+      return;
+    }
+    const sorted = [...data].sort((a, b) => (+b.value || 0) - (+a.value || 0));
+    const max = Math.max(1, ...sorted.map((d) => +d.value || 0));
+    const band = (W - P.l - P.r) / sorted.length;
+    sorted.forEach((d, i) => {
+      const v = +d.value || 0;
+      const h = (v / max) * (H - P.t - P.b);
+      const x = P.l + i * band;
+      const y = H - P.b - h;
+      const rect = ns("rect");
+      rect.setAttribute("x", x + 8);
+      rect.setAttribute("y", y);
+      rect.setAttribute("width", Math.max(8, band - 16));
+      rect.setAttribute("height", h);
+      rect.setAttribute("fill", "#9ab0ff");
+      rect.setAttribute("rx", "7");
+      svg.appendChild(rect);
+      const tx = ns("text");
+      tx.setAttribute("x", x + band / 2);
+      tx.setAttribute("y", H - 12);
+      tx.setAttribute("text-anchor", "middle");
+      tx.textContent = d.label;
+      svg.appendChild(tx);
+    });
+  },
+};
 
-    const label = String(labelAccessor(d) ?? '').slice(0, 18);
-    const tx = el(svg,'text',{ x: x + band.bandwidth*0.45, y: margin.t + innerH + 18, 'text-anchor':'middle', 'font-size':'10', fill:'#9aa8b5', dy: '0.6em' });
-    tx.textContent = label;
-    if (rotateLabels) tx.setAttribute('transform', `rotate(${rotateLabels} ${x + band.bandwidth*0.45} ${margin.t + innerH + 18})`);
+// ---------- Loaders ----------
+async function loadBasics() {
+  const d = await gql(Queries.USER);
+  return (d.user && d.user[0]) || null;
+}
 
-    const hot = el(svg,'rect',{ x, y: margin.t, width: band.bandwidth, height: innerH, fill:'transparent' });
-    const labelFull = String(labelAccessor(d) ?? '');
-    hot.addEventListener('pointerenter', (e)=> showTip(`<strong>${labelFull}</strong><br>${fmtInt(v)} XP`, e.clientX, e.clientY));
-    hot.addEventListener('pointermove',  (e)=> showTip(tooltip.innerHTML, e.clientX, e.clientY));
-    hot.addEventListener('pointerleave', hideTip);
+async function bootLoad() {
+  const basics = await loadBasics();
+  if (!basics) throw new Error("No user");
+  const uid = basics.id;
+
+  const [xpResp, resResp] = await Promise.all([
+    gql(Queries.XP, { uid }),
+    gql(Queries.RESULTS_LATEST, { uid }),
+  ]);
+
+  const xpRows = xpResp.transaction || [];
+  const totals = computeXpTotals(xpRows);
+
+  byId("user-login").textContent = basics.login;
+  byId("user-id").textContent = basics.id;
+  byId("xp-all").textContent = fmtXP(totals.all);
+  byId("xp-module").textContent = fmtXP(totals.module);
+
+  Charts.lineChart("#svg-xp", accumulateByDate(xpRows));
+  const pass = (resResp.result || []).filter((r) => +r.grade === 1).length;
+  const fail = (resResp.result || []).filter((r) => +r.grade !== 1).length;
+  Charts.donut("#svg-ratio", pass, fail);
+  Charts.bars("#svg-projects", groupLastProjects(xpRows, 12));
+
+  const list = byId("projects");
+  if (list) {
+    list.innerHTML = "";
+    xpRows
+      .slice(-12)
+      .reverse()
+      .forEach((r) => {
+        const div = document.createElement("div");
+        div.className = "item";
+        const t = document.createElement("div");
+        t.className = "title";
+        t.textContent = r.object?.name || lastSeg(r.path || "");
+        const m = document.createElement("div");
+        m.className = "meta";
+        m.textContent = `${(r.createdAt || "").slice(0, 10)} · ${fmtXP(r.amount)}`;
+        div.appendChild(t);
+        div.appendChild(m);
+        list.appendChild(div);
+      });
+  }
+}
+
+// ---------- Events ----------
+const loginForm = byId("form-login");
+if (loginForm) {
+  loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = byId("login-identity").value.trim();
+    const pw = byId("login-password").value;
+    byId("login-error").textContent = "";
+    try {
+      await signin(id, pw);
+      toggleScreens(true);
+      await bootLoad();
+    } catch (err) {
+      byId("login-error").textContent = err?.message || String(err);
+    }
   });
 }
+
+const btnLogout = byId("btn-logout");
+if (btnLogout) {
+  btnLogout.addEventListener("click", () => {
+    localStorage.removeItem(CFG.TOKEN_KEY);
+    sessionStorage.removeItem(CFG.TOKEN_KEY);
+    toggleScreens(false);
+    ["#svg-xp", "#svg-ratio", "#svg-projects"].forEach((sel) => {
+      const s = document.querySelector(sel);
+      if (s) s.innerHTML = "";
+    });
+    const list = byId("projects");
+    if (list) list.innerHTML = "";
+  });
+}
+
+// ---------- Boot ----------
+(function init() {
+  const jwt =
+    localStorage.getItem(CFG.TOKEN_KEY) || sessionStorage.getItem(CFG.TOKEN_KEY);
+  const ok = jwt && readJwtPayload(jwt);
+  if (ok) {
+    toggleScreens(true);
+    bootLoad().catch((e) => {
+      byId("login-error").textContent = e?.message || String(e);
+    });
+  } else {
+    toggleScreens(false);
+  }
+})();
