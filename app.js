@@ -1,16 +1,24 @@
-// js/app.js
+// js/app.js  (multi-page version: no single-page toggling)
+// Requires: api.js, queries.js, charts.js
+
 import { signinBasic, saveToken, getToken, clearToken, decodeJWT, gql } from './api.js';
 import { Q_ME, Q_RESULTS_WITH_USER, Q_XP, Q_OBJECT_NAMES, Q_PASSED_OBJECTS } from './queries.js';
 import { renderLineChart, renderBarChart } from './charts.js';
 
-const loginView   = document.getElementById('login-view');
-const profileView = document.getElementById('profile-view');
-const logoutBtn   = document.getElementById('logout-btn');
+/* -------------------------------------------------------
+   Routing (edit these to match your filenames/paths)
+-------------------------------------------------------- */
+const LOGIN_URL   = 'login.html';    // ← عدّلها إذا اسم صفحة تسجيل الدخول مختلف
+const PROFILE_URL = 'profile.html';  // ← عدّلها إذا اسم صفحة البروفايل مختلف
 
+/* -------------------------------------------------------
+   DOM (guarded – works whether elements exist or not)
+-------------------------------------------------------- */
 const loginForm   = document.getElementById('login-form');
 const idInput     = document.getElementById('identifier');
 const pwInput     = document.getElementById('password');
 const loginError  = document.getElementById('login-error');
+const logoutBtn   = document.getElementById('logout-btn');
 
 const uLogin = document.getElementById('u-login');
 const uEmail = document.getElementById('u-email');
@@ -31,39 +39,30 @@ const toastEl   = document.getElementById('toast');
 /* ------------------ Rules ------------------ */
 const EXCLUDE_KEYWORDS = ['checkpoint', 'raid', '/audit']; // always drop
 const PISCINE_KEYWORD  = 'piscine';
-// Treat these as "exam micro-exercises": tiny exercises (<= 300 bytes) or anything that hints "exam"
 const EXAM_HINTS       = ['exam'];
 const EXAM_MAX_BYTES   = 300;
 
-/* ------------------ UX helpers ------------------ */
-function show(view){
-  if(view === 'login'){
-    loginView.classList.add('active');
-    profileView.classList.remove('active');
-    loginView.setAttribute('aria-hidden', 'false');
-    profileView.setAttribute('aria-hidden', 'true');
-    logoutBtn.hidden = true;
-  } else {
-    profileView.classList.add('active');
-    loginView.classList.remove('active');
-    profileView.setAttribute('aria-hidden', 'false');
-    loginView.setAttribute('aria-hidden', 'true');
-    logoutBtn.hidden = false;
-  }
-}
+/* ------------------ Utils ------------------ */
+const nf = new Intl.NumberFormat();
+function fmtNum(n){ return nf.format(n); }
+function toDay(ts){ return new Date(ts).toISOString().slice(0,10); }
+function isMobile(){ return window.matchMedia('(max-width: 600px)').matches; }
 
 function startLoading(msg='Loading…'){
-  loadingEl.querySelector('p').textContent = msg;
+  if(!loadingEl) return;
+  loadingEl.querySelector?.('p')?.textContent = msg;
   loadingEl.classList.remove('hidden');
   loadingEl.setAttribute('aria-hidden','false');
 }
 function stopLoading(){
+  if(!loadingEl) return;
   loadingEl.classList.add('hidden');
   loadingEl.setAttribute('aria-hidden','true');
 }
 
 let toastTimer = null;
 function toast(message, ms=2500){
+  if(!toastEl) return;
   toastEl.textContent = message;
   toastEl.classList.remove('hidden');
   requestAnimationFrame(()=> toastEl.classList.add('show'));
@@ -74,63 +73,93 @@ function toast(message, ms=2500){
   }, ms);
 }
 
-const nf = new Intl.NumberFormat();
-function fmtNum(n){ return nf.format(n); }
-function toDay(ts){ return new Date(ts).toISOString().slice(0,10); }
-function isMobile(){ return window.matchMedia('(max-width: 600px)').matches; }
+/* ------------------ Page detection ------------------ */
+const onLoginPage   = !!loginForm;
+const onProfilePage = !!uId || !!uLogin || !!svgXPTime || !!svgXPProject;
 
-/* ------------------ init ------------------ */
+/* ------------------ Boot & Routing ------------------ */
 document.addEventListener('DOMContentLoaded', async () => {
-  if(getToken()){
-    show('profile');
+  const token = getToken();
+  const hasJWT = !!(token && decodeJWT(token));
+
+  // If we're on the login page and already authed → go to profile
+  if (onLoginPage) {
+    if (hasJWT) {
+      location.replace(PROFILE_URL);
+      return;
+    }
+    wireLogin();
+  }
+
+  // If we're on the profile page and not authed → go to login
+  if (onProfilePage) {
+    if (!hasJWT) {
+      location.replace(LOGIN_URL);
+      return;
+    }
     startLoading('Fetching your profile…');
-    try { await loadProfile(); }
-    catch(err){ toast(err.message || String(err), 4000); }
-    finally{ stopLoading(); }
-  }else{
-    show('login');
+    try {
+      await loadProfile();
+    } catch (err) {
+      toast(err?.message || String(err), 4000);
+    } finally {
+      stopLoading();
+    }
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        clearToken();
+        location.replace(LOGIN_URL);
+      });
+    }
   }
 });
 
-logoutBtn.addEventListener('click', () => {
-  clearToken();
-  show('login');
-  loginForm.reset();
-  idInput.focus();
-  toast('Logged out');
-});
+/* ------------------ Login wiring (login.html) ------------------ */
+function wireLogin(){
+  if (!loginForm) return;
 
-loginForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  loginError.hidden = true;
-  const identifier = idInput.value.trim();
-  const password   = pwInput.value;
+  loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (loginError) loginError.hidden = true;
 
-  if(!identifier || !password){
-    loginError.textContent = 'Please enter both identifier and password.';
-    loginError.hidden = false; return;
-  }
+    const identifier = idInput?.value?.trim() || '';
+    const password   = pwInput?.value || '';
 
-  try{
-    loginForm.querySelector('button[type="submit"]').disabled = true;
-    startLoading('Signing you in…');
-    const jwt = await signinBasic(identifier, password);
-    saveToken(jwt);
-    show('profile');
-    startLoading('Loading your data…');
-    await loadProfile();
-    toast('Welcome 👋');
-  }catch(err){
-    loginError.textContent = err.message || 'Sign in failed.';
-    loginError.hidden = false;
-    toast('Signin failed', 2500);
-  }finally{
-    stopLoading();
-    loginForm.querySelector('button[type="submit"]').disabled = false;
-  }
-});
+    if(!identifier || !password){
+      if(loginError){
+        loginError.textContent = 'Please enter both identifier and password.';
+        loginError.hidden = false;
+      }
+      return;
+    }
 
-/* ------------------ loadProfile ------------------ */
+    try{
+      const submitBtn = loginForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      startLoading('Signing you in…');
+
+      const jwt = await signinBasic(identifier, password);
+      saveToken(jwt);
+
+      toast('Welcome 👋');
+      // Go to profile page
+      location.replace(PROFILE_URL);
+    }catch(err){
+      if(loginError){
+        loginError.textContent = err?.message || 'Sign in failed.';
+        loginError.hidden = false;
+      }
+      toast('Signin failed', 2500);
+    }finally{
+      stopLoading();
+      const submitBtn = loginForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
+
+/* ------------------ Profile loader (profile.html) ------------------ */
 let isLoadingProfile = false;
 async function loadProfile(){
   if (isLoadingProfile) return;
@@ -140,9 +169,10 @@ async function loadProfile(){
     const me = await gql(Q_ME);
     const user = me?.user?.[0];
     if(!user) throw new Error('Failed to load user.');
-    uLogin.textContent = user.login ?? '—';
-    uEmail.textContent = user.email ?? '—';
-    uId.textContent    = user.id ?? '—';
+
+    if(uLogin) uLogin.textContent = user.login ?? '—';
+    if(uEmail) uEmail.textContent = user.email ?? '—';
+    if(uId)    uId.textContent    = user.id ?? '—';
 
     // Data
     const [xpData, passedData, feedData] = await Promise.all([
@@ -152,21 +182,23 @@ async function loadProfile(){
     ]);
 
     // Feed list
-    const results = feedData?.result ?? [];
-    latestList.replaceChildren();
-    if(!results.length){
-      noResultsEl.hidden = false;
-    }else{
-      noResultsEl.hidden = true;
-      results.forEach(r => {
-        const li = document.createElement('li');
-        const left = document.createElement('span');
-        const right = document.createElement('strong');
-        left.textContent = `${new Date(r.createdAt).toLocaleDateString()} • ${r.type || 'result'} #${r.id}`;
-        right.textContent = String(r.grade);
-        li.append(left, right);
-        latestList.appendChild(li);
-      });
+    if (latestList && noResultsEl){
+      const results = feedData?.result ?? [];
+      latestList.replaceChildren();
+      if(!results.length){
+        noResultsEl.hidden = false;
+      }else{
+        noResultsEl.hidden = true;
+        results.forEach(r => {
+          const li = document.createElement('li');
+          const left = document.createElement('span');
+          const right = document.createElement('strong');
+          left.textContent = `${new Date(r.createdAt).toLocaleDateString()} • ${r.type || 'result'} #${r.id}`;
+          right.textContent = String(r.grade);
+          li.append(left, right);
+          latestList.appendChild(li);
+        });
+      }
     }
 
     // Transactions / progress
@@ -174,9 +206,9 @@ async function loadProfile(){
     const passedRowsAll = passedData?.progress ?? [];
 
     if (!txsAll.length) {
-      uXP.textContent = '0 kB';
-      svgXPTime.replaceChildren(); noXPTime.hidden = false;
-      svgXPProject.replaceChildren(); noXPProject.hidden = false;
+      if(uXP) uXP.textContent = '0 kB';
+      if(svgXPTime && noXPTime){ svgXPTime.replaceChildren(); noXPTime.hidden = false; }
+      if(svgXPProject && noXPProject){ svgXPProject.replaceChildren(); noXPProject.hidden = false; }
       return;
     }
 
@@ -272,76 +304,78 @@ async function loadProfile(){
       officialTotal += amt;
     });
 
-    // Display total in kB (ceil to match dashboard style)
+    // Display total in kB (ceil to match your current style)
     const kb = Math.ceil(officialTotal / 1000);
-    uXP.textContent = kb + ' kB';
+    if(uXP) uXP.textContent = kb + ' kB';
 
     // ---------------- Charts ----------------
-    // Daily sums by date (using pass/first date), then make it CUMULATIVE
-    const byDay = new Map();
-    officialEntries.forEach(e => {
-      const day = toDay(e.passedAt);
-      byDay.set(day, (byDay.get(day) || 0) + e.amount);
-    });
-
-    const dailySorted = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
-    let running = 0;
-    const seriesTime = dailySorted.map(([d,amt]) => {
-      running += amt;
-      return { x: new Date(d).getTime(), y: running, label: `${d}: total ${fmtNum(running)} XP` };
-    });
-
-    if(seriesTime.length){
-      noXPTime.hidden = true;
-      renderLineChart(svgXPTime, seriesTime, {
-        xAccessor: d => d.x,
-        yAccessor: d => d.y,
-        titles: seriesTime.map(d => d.label),
-        yLabel: 'Cumulative XP',
-        margin: isMobile() ? { t:16, r:12, b:42, l:52 } : { t:18, r:16, b:34, l:56 }
+    // XP over time (cumulative)
+    if (svgXPTime && noXPTime) {
+      const byDay = new Map();
+      officialEntries.forEach(e => {
+        const day = toDay(e.passedAt);
+        byDay.set(day, (byDay.get(day) || 0) + e.amount);
       });
-    } else {
-      noXPTime.hidden = false;
-      svgXPTime.replaceChildren();
+      const dailySorted = [...byDay.entries()].sort((a,b)=> a[0].localeCompare(b[0]));
+      let running = 0;
+      const seriesTime = dailySorted.map(([d,amt]) => {
+        running += amt;
+        return { x: new Date(d).getTime(), y: running, label: `${d}: total ${fmtNum(running)} XP` };
+      });
+
+      if(seriesTime.length){
+        noXPTime.hidden = true;
+        renderLineChart(svgXPTime, seriesTime, {
+          xAccessor: d => d.x,
+          yAccessor: d => d.y,
+          titles: seriesTime.map(d => d.label),
+          yLabel: 'Cumulative XP',
+          margin: isMobile() ? { t:16, r:12, b:42, l:52 } : { t:18, r:16, b:34, l:56 }
+        });
+      } else {
+        noXPTime.hidden = false;
+        svgXPTime.replaceChildren();
+      }
     }
 
-    // Bars: show top items (projects+piscine root+exam micros)
-    let bars = officialEntries.map(e => ({
-      id: e.objectId,
-      name: (rawNameById.get(e.objectId) || String(e.objectId)).replace(/\bproject—|\bpiscine—/gi, ''),
-      sum: e.amount
-    }))
-    .sort((a,b)=> b.sum - a.sum)
-    .slice(0, 16);
+    // XP by project (bars)
+    if (svgXPProject && noXPProject){
+      let bars = officialEntries.map(e => ({
+        id: e.objectId,
+        name: (rawNameById.get(e.objectId) || String(e.objectId)).replace(/\bproject—|\bpiscine—/gi, ''),
+        sum: e.amount
+      }))
+      .sort((a,b)=> b.sum - a.sum)
+      .slice(0, 16);
 
-    if(bars.length){
-      noXPProject.hidden = true;
-      renderBarChart(svgXPProject, bars, {
-        xAccessor: d => d.name,
-        yAccessor: d => d.sum,
-        labelAccessor: d => d.name,
-        yLabel: 'XP',
-        margin: isMobile() ? { t:16, r:12, b:76, l:52 } : { t:18, r:16, b:58, l:56 }
-      });
-    } else {
-      noXPProject.hidden = false;
-      svgXPProject.replaceChildren();
+      if(bars.length){
+        noXPProject.hidden = true;
+        renderBarChart(svgXPProject, bars, {
+          xAccessor: d => d.name,
+          yAccessor: d => d.sum,
+          labelAccessor: d => d.name,
+          yLabel: 'XP',
+          margin: isMobile() ? { t:16, r:12, b:76, l:52 } : { t:18, r:16, b:58, l:56 }
+        });
+      } else {
+        noXPProject.hidden = false;
+        svgXPProject.replaceChildren();
+      }
     }
 
-    // Debug
     console.debug('[XP]',
       'includedIds:', includedIds.length,
-      'officialTotal:', officialTotal, 'displayKB(ceil):', kb
+      'officialTotal:', officialTotal, 'displayKB(ceil):', Math.ceil(officialTotal/1000)
     );
   } finally {
     isLoadingProfile = false;
   }
 }
 
-/* ------------------ resize re-render ------------------ */
+/* ------------------ Optional: resize re-render (profile only) ------------------ */
 let rerenderTimer = null;
 window.addEventListener('resize', () => {
-  if (loginView.classList.contains('active')) return;
+  if (!onProfilePage) return;
   clearTimeout(rerenderTimer);
   rerenderTimer = setTimeout(() => {
     loadProfile().catch(console.error);
