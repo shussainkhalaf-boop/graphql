@@ -1,40 +1,4 @@
 // charts.js — tiny SVG chart helpers (no libs)
-
-
-function select(el){ return (typeof el === 'string') ? document.querySelector(el) : el; }
-function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
-function fmt(n){ return new Intl.NumberFormat().format(n|0); }
-
-
-export function renderLineChart(svg, points, {pad=40, yLabel="XP"}={}){
-svg = select(svg); svg.innerHTML = "";
-if(!points?.length){ svg.innerHTML = labelCenter("No data"); return; }
-const W = svg.viewBox.baseVal.width || 800, H = svg.viewBox.baseVal.height || 360;
-const xmin = +points[0].x, xmax = +points[points.length-1].x;
-const ymin = 0, ymax = Math.max(...points.map(p=>p.y)) * 1.1;
-const x = (t)=> pad + ( ( (t - xmin) / (xmax - xmin || 1) ) * (W - pad*2) );
-const y = (v)=> H - pad - ( (v - ymin) / (ymax - ymin || 1) ) * (H - pad*2);
-
-
-// axes
-svg.appendChild(line(pad, H-pad, W-pad, H-pad, '#394155'));
-svg.appendChild(line(pad, pad, pad, H-pad, '#394155'));
-
-
-// path
-const d = points.map((p,i)=> (i?"L":"M") + x(+p.x) + "," + y(p.y)).join(" ");
-const path = el('path', { d, fill:'none', stroke:'url(#lg)', 'stroke-width':3 });
-
-
-// gradient
-const defs = el('defs');
-const lg = el('linearGradient', { id:'lg', x1:'0', y1:'0', x2:'1', y2:'0' });
-lg.appendChild(el('stop', { offset:'0%', stop-color:'#7c3aed' }));
-lg.appendChild(el('stop', { offset:'100%', stop-color:'#06b6d4' }));
-defs.appendChild(lg);
-svg.appendChild(defs);
-
-
 svg.appendChild(path);
 
 
@@ -72,4 +36,25 @@ svg.appendChild(line(pad, H-pad, W-pad, H-pad, '#394155'));
 export function renderDonut(svg, a, b){
 svg = select(svg); svg.innerHTML = "";
 const total = (a|0)+(b|0); if(!total){ svg.innerHTML = labelCenter("No data"); return; }
+const cx=160, cy=160, r=110, stroke=28, C=2*Math.PI*r;
+const pA = a/total, pB = b/total;
+const ring = (dash, rot, color)=>{
+const c = el('circle', { cx, cy, r, fill:'none', 'stroke-width':stroke, stroke:color });
+c.setAttribute('stroke-dasharray', `${dash} ${C-dash}`);
+c.setAttribute('transform', `rotate(${rot} ${cx} ${cy})`);
+return c;
+};
+// background ring
+svg.appendChild(el('circle', { cx, cy, r, fill:'none', 'stroke-width':stroke, stroke:'#1f2536', opacity:.8 }));
+// segments (start at -90deg)
+svg.appendChild(ring(C*pA, -90, '#10b981'));
+svg.appendChild(ring(C*pB, -90 + 360*pA, '#ef4444'));
+svg.appendChild(text(cx, cy, `${Math.round(pA*100)}%`, 'middle'));
+}
+
+
+// --- tiny SVG helpers ---
+function el(tag, attrs={}){ const n = document.createElementNS('http://www.w3.org/2000/svg', tag); for(const k in attrs){ n.setAttribute(k, attrs[k]); } return n; }
+function line(x1,y1,x2,y2,stroke){ return el('line', { x1,y1,x2,y2, stroke, 'stroke-width':1 }); }
+function text(x,y,content,anchor='start'){ const t = el('text', { x,y, 'text-anchor':anchor }); t.textContent = content; return t; }
 function labelCenter(msg){ return `<text x="50%" y="50%" text-anchor="middle">${msg}</text>`; }
