@@ -1,9 +1,5 @@
 // app.js — glue UI + data + charts
-const token = getToken();
-if(!token){ setScreen(false); return; }
-const payload = decodeJWT(token);
-const uid = payload?.userId || payload?.sub || payload?.id; // schema varies
-if(!uid){ clearToken(); setScreen(false); return; }
+if(!uid){ clearToken(); setScreen(false); alert('Cannot find user id in JWT.'); return; }
 
 
 setScreen(true);
@@ -27,7 +23,7 @@ const pr = (await gql(Q_PROGRESS, { uid: +uid })).progress || [];
 const pass = pr.filter(p=> Number(p.grade) === 1).length;
 const fail = pr.filter(p=> Number(p.grade) === 0).length;
 uPass.textContent = pass; uFail.textContent = fail;
-pfNote.textContent = pass+fail ? `${Math.round(pass*100/(pass+fail))}% pass out of ${pass+fail}` : '—';
+pfNote.textContent = pass+fail ? `${Math.round(pass*100/(pass+fail))}% pass of ${pass+fail}` : '—';
 
 
 // 4. Compute totals & series
