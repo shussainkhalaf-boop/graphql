@@ -1,4 +1,25 @@
 // app.js — glue UI + data + charts
+const token = getToken();
+if(!token){ setScreen(false); return; }
+const payload = decodeJWT(token);
+const uid = payload?.userId || payload?.sub || payload?.id; // schema varies
+if(!uid){ clearToken(); setScreen(false); return; }
+
+
+setScreen(true);
+
+
+try{
+// 1. Who am I?
+const me = await gql(Q_ME, {});
+const user = Array.isArray(me.user) ? me.user[0] : me.user;
+uLogin.textContent = user?.login || 'me';
+uId.textContent = String(user?.id ?? uid);
+
+
+// 2. XP transactions
+const xpData = await gql(Q_XP, { uid: +uid });
+const tx = xpData.transaction || [];
 
 
 // 3. Progress (pass/fail)
