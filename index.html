@@ -1,163 +1,57 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GraphQL</title>
-  <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="style.css" />
-</head>
-<body>
-  <!-- animated background -->
-  <div class="bg">
-    <div class="orb orb1"></div>
-    <div class="orb orb2"></div>
-    <div class="gridlines"></div>
-  </div>
+<div class="row between center">
+<div>
+<h2 id="u-login">—</h2>
+<div class="muted small">ID: <span id="u-id">—</span></div>
+</div>
+<div class="stats">
+<div class="stat">
+<div class="label">Total XP</div>
+<div class="value" id="u-xp">0</div>
+</div>
+<div class="stat">
+<div class="label">Passed</div>
+<div class="value" id="u-pass">0</div>
+</div>
+<div class="stat">
+<div class="label">Failed</div>
+<div class="value" id="u-fail">0</div>
+</div>
+</div>
+</div>
+</section>
 
-  <header class="topbar glass">
-    <div class="brand">
-      <!-- Inline SVG Logo -->
-      <svg class="logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true" focusable="false">
-        <defs>
-          <linearGradient id="grad-nav" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#7c3aed"/>
-            <stop offset="100%" stop-color="#06b6d4"/>
-          </linearGradient>
-          <filter id="glow-nav" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="6" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <circle cx="60" cy="60" r="52" fill="url(#grad-nav)" stroke="#ffffff33" stroke-width="6" filter="url(#glow-nav)"/>
-        <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
-      </svg>
-      <span class="wordmark">GraphQL</span>
-    </div>
-    <nav class="nav">
-      <a href="#" id="btn-logout" class="chip">Logout</a>
-    </nav>
-  </header>
 
-  <!-- LOGIN -->
-  <main id="screen-login" class="screen center">
-    <section class="card card-login glass">
-      <div class="login-head">
-        <div class="logo-wrap">
-          <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
-            <defs>
-              <linearGradient id="grad-lg" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#7c3aed"/>
-                <stop offset="100%" stop-color="#06b6d4"/>
-              </linearGradient>
-            </defs>
-            <circle cx="60" cy="60" r="52" fill="url(#grad-lg)" stroke="#ffffff33" stroke-width="6"/>
-            <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
-          </svg>
-        </div>
-        <h1>Welcome back</h1>
-        <p class="muted">Sign in to fetch your data from GraphQL.</p>
-      </div>
-      <form id="login-form" autocomplete="on">
-        <label class="field">
-          <span>Username or Email</span>
-          <input id="identity" name="identity" type="text" required />
-        </label>
-        <label class="field">
-          <span>Password</span>
-          <input id="password" name="password" type="password" required />
-        </label>
-        <label class="checkbox">
-          <input type="checkbox" id="remember" checked />
-          <span>Remember me</span>
-        </label>
-        <button type="submit" id="btn-login" class="btn">Get JWT</button>
-        <p id="login-error" class="error hidden"></p>
-      </form>
-    </section>
-  </main>
+<section class="grid two">
+<article class="card glass">
+<h3>XP over Time</h3>
+<svg id="chart-xp-time" viewBox="0 0 800 360" role="img" aria-label="XP over time"></svg>
+<div class="muted small" id="xp-time-note"></div>
+</article>
+<article class="card glass">
+<h3>Top Projects by XP</h3>
+<svg id="chart-xp-projects" viewBox="0 0 800 360" role="img" aria-label="Top projects by XP"></svg>
+<div class="muted small">Top 10 projects</div>
+</article>
+<article class="card glass">
+<h3>Pass / Fail Ratio</h3>
+<svg id="chart-passfail" viewBox="0 0 320 320" role="img" aria-label="Pass fail ratio"></svg>
+<div class="muted small" id="pf-note"></div>
+</article>
+<article class="card glass">
+<h3>Latest Results</h3>
+<ul id="latest-results" class="list"></ul>
+<div id="no-results" class="muted">No results yet.</div>
+</article>
+</section>
+</main>
 
-  <!-- APP -->
-  <main id="screen-app" class="screen">
-    <section class="hero glass">
-      <div class="logo-wrap">
-        <svg class="logo-svg lg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" aria-hidden="true">
-          <defs>
-            <linearGradient id="grad-hero" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#7c3aed"/>
-              <stop offset="100%" stop-color="#06b6d4"/>
-            </linearGradient>
-          </defs>
-          <circle cx="60" cy="60" r="52" fill="url(#grad-hero)" stroke="#ffffff33" stroke-width="6"/>
-          <text x="50%" y="58%" text-anchor="middle" fill="#ffffff" font-size="44" font-weight="800" font-family="monospace">01</text>
-        </svg>
-      </div>
-      <div class="hero-text">
-        <h2 id="hero-name">Your profile</h2>
-        <p class="muted">Track your XP, results and projects in style.</p>
-      </div>
-    </section>
 
-    <section class="grid three">
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-user"></span> Basics</h3>
-        <div class="kv">
-          <div><span class="k">ID</span><span id="u-id" class="v">-</span></div>
-          <div><span class="k">Login</span><span id="u-login" class="v">-</span></div>
-          <div><span class="k">First</span><span id="u-first" class="v">-</span></div>
-          <div><span class="k">Last</span><span id="u-last" class="v">-</span></div>
-        </div>
-      </section>
+<footer class="foot muted small">
+<span>SVG graphs · Vanilla JS · JWT (Bearer)</span>
+</footer>
 
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-stats"></span> Quick stats</h3>
-        <div class="kv">
-          <div><span class="k">Total XP</span><span id="xp-total" class="v">-</span></div>
-          <div><span class="k">Audit ratio</span><span id="audit-ratio" class="v">-</span></div>
-          <div><span class="k">Passed</span><span id="passed-count" class="v">-</span></div>
-          <div><span class="k">Failed</span><span id="failed-count" class="v">-</span></div>
-        </div>
-      </section>
 
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-rocket"></span> Recent projects</h3>
-        <div id="projects" class="projects"></div>
-      </section>
-    </section>
-
-    <section class="grid two">
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-line"></span> XP over time</h3>
-        <div class="chart">
-          <svg id="svg-xp" viewBox="0 0 680 280"></svg>
-        </div>
-      </section>
-      <section class="card glass">
-        <h3 class="card-title"><span class="ic ic-donut"></span> Pass vs Fail</h3>
-        <div class="chart center">
-          <svg id="svg-ratio" viewBox="0 0 280 280"></svg>
-        </div>
-      </section>
-    </section>
-
-    <section class="card glass">
-      <h3 class="card-title"><span class="ic ic-bars"></span> XP by project type</h3>
-      <div class="chart">
-        <svg id="svg-type" viewBox="0 0 680 300"></svg>
-      </div>
-    </section>
-  </main>
-
-  <footer class="foot glass"></footer>
-
-  <script>
-    window.__CONFIG__ = {
-      SIGNIN_URL: "https://learn.reboot01.com/api/auth/signin",
-      GRAPHQL_URL: "https://learn.reboot01.com/api/graphql-engine/v1/graphql"
-    };
-  </script>
-  <!-- single script only -->
-  <script src="app.js"></script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
-
