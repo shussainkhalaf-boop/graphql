@@ -8,22 +8,25 @@
   <link rel="stylesheet" href="./style.css" />
   <meta name="color-scheme" content="dark light" />
   <script>
-    // ---- Runtime configuration (override if you use a proxy) ----
+    // ---- Runtime configuration ----
     window.__CONFIG__ = {
       SIGNIN_URL: "https://learn.reboot01.com/api/auth/signin",
       GRAPHQL_URL: "https://learn.reboot01.com/api/graphql-engine/v1/graphql",
-      TOKEN_KEY: "reboot01.jwt"
-      // Optional: if you deploy a tiny proxy/worker, set SIGNIN_URL/GRAPHQL_URL to that.
+      TOKEN_KEY: "reboot01.jwt",
+      // Optional: لو عندك Cloudflare Worker Proxy
+      // PROXY: "https://your-worker.example/?t="
     };
   </script>
 </head>
 <body>
+  <!-- خلفية -->
   <div class="bg">
     <div class="orb orb1"></div>
     <div class="orb orb2"></div>
     <div class="gridlines"></div>
   </div>
 
+  <!-- شريط علوي -->
   <header class="topbar glass">
     <div class="brand">
       <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
@@ -41,11 +44,11 @@
     <button id="logout-btn" class="btn subtle hidden">Logout</button>
   </header>
 
-  <!-- Login Screen -->
+  <!-- شاشة تسجيل الدخول -->
   <main id="login-view" class="screen">
     <section class="card glass">
       <h1>Sign in</h1>
-      <p class="muted">Use your platform username <em>or</em> email with your password.</p>
+      <p class="muted">استخدم <b>username أو email</b> مع الباسورد.</p>
       <form id="login-form">
         <label>Username or Email
           <input id="identifier" name="identifier" autocomplete="username" required />
@@ -59,7 +62,7 @@
     </section>
   </main>
 
-  <!-- App Screen -->
+  <!-- شاشة البروفايل -->
   <main id="profile-view" class="screen hidden">
     <section class="card glass">
       <div class="row between center">
@@ -68,18 +71,9 @@
           <div class="muted small">ID: <span id="u-id">—</span></div>
         </div>
         <div class="stats">
-          <div class="stat">
-            <div class="label">Total XP</div>
-            <div class="value" id="u-xp">0</div>
-          </div>
-          <div class="stat">
-            <div class="label">Passed</div>
-            <div class="value" id="u-pass">0</div>
-          </div>
-          <div class="stat">
-            <div class="label">Failed</div>
-            <div class="value" id="u-fail">0</div>
-          </div>
+          <div class="stat"><div class="label">Total XP</div><div class="value" id="u-xp">0</div></div>
+          <div class="stat"><div class="label">Passed</div><div class="value" id="u-pass">0</div></div>
+          <div class="stat"><div class="label">Failed</div><div class="value" id="u-fail">0</div></div>
         </div>
       </div>
     </section>
@@ -87,17 +81,17 @@
     <section class="grid two">
       <article class="card glass">
         <h3>XP over Time</h3>
-        <svg id="chart-xp-time" viewBox="0 0 800 360" role="img" aria-label="XP over time"></svg>
+        <svg id="chart-xp-time" viewBox="0 0 800 360"></svg>
         <div class="muted small" id="xp-time-note"></div>
       </article>
       <article class="card glass">
         <h3>Top Projects by XP</h3>
-        <svg id="chart-xp-projects" viewBox="0 0 800 360" role="img" aria-label="Top projects by XP"></svg>
+        <svg id="chart-xp-projects" viewBox="0 0 800 360"></svg>
         <div class="muted small">Top 10 projects</div>
       </article>
       <article class="card glass">
         <h3>Pass / Fail Ratio</h3>
-        <svg id="chart-passfail" viewBox="0 0 320 320" role="img" aria-label="Pass fail ratio"></svg>
+        <svg id="chart-passfail" viewBox="0 0 320 320"></svg>
         <div class="muted small" id="pf-note"></div>
       </article>
       <article class="card glass">
@@ -108,6 +102,7 @@
     </section>
   </main>
 
+  <!-- فوتر -->
   <footer class="foot muted small">
     <span>SVG graphs · Vanilla JS · JWT (Bearer)</span>
   </footer>
