@@ -1,6 +1,10 @@
 // api.js — auth + graphql helpers (vanilla)
 
 
+const CFG = (window.__CONFIG__ || {});
+const TOKEN_KEY = CFG.TOKEN_KEY || "reboot01.jwt";
+
+
 export function saveToken(jwt){ try{ localStorage.setItem(TOKEN_KEY, jwt); }catch{} }
 export function getToken(){ try{ return localStorage.getItem(TOKEN_KEY)||"";}catch{return "";} }
 export function clearToken(){ try{ localStorage.removeItem(TOKEN_KEY);}catch{} }
