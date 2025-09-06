@@ -1,77 +1,113 @@
-// api.js — auth + graphql helpers (vanilla) with CORS-friendly fallbacks
+// js/api.js
 
+// Direct endpoints (works on Vercel / any static host)
+const SIGNIN_URL = 'https://learn.reboot01.com/api/auth/signin';
+const GQL_URL    = 'https://learn.reboot01.com/api/graphql-engine/v1/graphql';
 
-function b64uEncode(str){
-// UTF-8 safe base64
-return btoa(unescape(encodeURIComponent(str)));
+/* ------------------------------------------------------------------ */
+/* Storage                                                            */
+/* ------------------------------------------------------------------ */
+export function saveToken(jwt){ localStorage.setItem('jwt', jwt); }
+export function getToken(){ return localStorage.getItem('jwt'); }
+export function clearToken(){ localStorage.removeItem('jwt'); }
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+// UTF-8 safe btoa (regular btoa breaks on non-ASCII)
+function btoaUtf8(str) {
+  return btoa(unescape(encodeURIComponent(str)));
 }
 
-
-function withProxy(url){
-// Optional proxy passthrough: set __CONFIG__.PROXY like "https://<worker>/?t="
-const P = CFG.PROXY || "";
-return P ? P + encodeURIComponent(url) : url;
+// Extract a clean JWT from any text body (handles quotes/newlines)
+function extractJWT(text) {
+  const trimmed = String(text || '').trim();
+  const unquoted = (trimmed.startsWith('"') && trimmed.endsWith('"'))
+    ? trimmed.slice(1, -1)
+    : trimmed;
+  const m = unquoted.match(/[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+/);
+  return m ? m[0] : null;
 }
 
+/* ------------------------------------------------------------------ */
+/* JWT utils                                                          */
+/* ------------------------------------------------------------------ */
+export function decodeJWT(token){
+  try{
+    const parts = String(token).split('.');
+    if(parts.length !== 3) return null;
+    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const pad = b64.length % 4; if (pad) b64 += '='.repeat(4 - pad);
+    const jsonStr = atob(b64);
+    // handle UTF-8 payloads safely
+    const utf8 = decodeURIComponent(escape(jsonStr));
+    return JSON.parse(utf8);
+  }catch{
+    return null;
+  }
+}
 
-function extractJwtFromText(t=""){ const m = t.match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/); return m? m[0] : ""; }
-
-
+/* ------------------------------------------------------------------ */
+/* Auth                                                               */
+/* ------------------------------------------------------------------ */
+// POST signin with Basic auth -> upstream returns JWT (text)
 export async function signinBasic(identifier, password){
-const url = withProxy(CFG.SIGNIN_URL);
-const res = await fetch(url, {
-method: "POST",
-headers: {
-"authorization": "Basic " + b64uEncode(`${identifier}:${password}`),
-}
-});
+  const id = String(identifier || '').trim();
+  const pw = String(password || '');
+  if(!id || !pw) throw new Error('Please enter both identifier and password.');
 
+  const credentials = btoaUtf8(`${id}:${pw}`);
 
-// Try to read JWT from exposed header first
-const auth = res.headers.get("authorization") || res.headers.get("Authorization") || "";
-let jwt = (auth || "").replace(/^Bearer\s+/i, "").trim();
+  const res = await fetch(SIGNIN_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Basic ${credentials}` },
+    mode: 'cors',
+  });
 
+  const raw = await res.text().catch(()=> '');
+  if(!res.ok){
+    // Common: 401 invalid creds, 403/4xx forbidden (CORS or policy)
+    const msg = raw?.trim() || `Signin failed (HTTP ${res.status})`;
+    throw new Error(msg);
+  }
 
-// If header isn't exposed due to CORS, try to parse body as fallback
-if(!jwt){
-const txt = await res.text().catch(()=>"");
-jwt = extractJwtFromText(txt);
-}
-
-
-if(!res.ok || !jwt){
-const msg = `Sign-in failed (${res.status})` + (!auth && res.ok ? " — JWT header not exposed; set __CONFIG__.PROXY" : "");
-throw new Error(msg);
-}
-return jwt;
-}
-
-
-export async function gql(query, variables={}){
-const token = getToken();
-if(!token) throw new Error("Missing JWT. Please sign in.");
-const url = withProxy(CFG.GRAPHQL_URL);
-const res = await fetch(url, {
-method: "POST",
-headers: {
-"content-type": "application/json",
-"authorization": `Bearer ${token}`
-},
-body: JSON.stringify({ query, variables })
-});
-const json = await res.json().catch(()=>({}));
-if(!res.ok || json.errors){
-const msg = json.errors?.[0]?.message || `GraphQL error (${res.status})`;
-throw new Error(msg);
-}
-return json.data;
+  const token = extractJWT(raw);
+  if(!token){
+    console.error('Unexpected signin response body:', raw);
+    throw new Error('Signin returned no token.');
+  }
+  return token;
 }
 
+/* ------------------------------------------------------------------ */
+/* GraphQL                                                            */
+/* ------------------------------------------------------------------ */
+// POST GraphQL with Bearer -> returns { data, errors? }
+export async function gql(query, variables = {}){
+  const token = getToken();
+  if(!token) throw new Error('Missing token');
 
-export function decodeJWT(jwt){
-try{
-const [,payload] = jwt.split(".");
-const json = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g,"+").replace(/_/g,"/")))));
-return json || {};
-}catch{ return {}; }
+  const res = await fetch(GQL_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type':'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ query, variables }),
+    mode: 'cors',
+  });
+
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    const raw = await res.text().catch(()=> '');
+    throw new Error(raw?.trim() || `GraphQL HTTP ${res.status}`);
+  }
+
+  if(!res.ok) throw new Error(body?.errors?.[0]?.message || `GraphQL HTTP ${res.status}`);
+  if(body?.errors?.length) throw new Error(body.errors[0].message || 'GraphQL error');
+
+  return body?.data;
 }
