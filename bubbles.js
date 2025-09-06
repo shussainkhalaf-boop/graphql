@@ -1,19 +1,21 @@
-// js/bubbles.js (variant) — tiny visual/behavior tweaks
+// js/bubbles.js
 
 const ROOT = document.getElementById('blobs');
 
+// Tweakables
 const CONFIG = {
-  count: 8,               // +1 for a denser look
-  minSize: 176,
-  maxSize: 348,
-  minDur: 15.5,
-  maxDur: 27.5,
-  minHueDur: 17.5,
-  maxHueDur: 29.5,
-  edgePadding: 7,         // a bit more padding from edges
-  parallax: 9,            // slightly subtler parallax
+  count: 7,                // how many blobs
+  minSize: 180,            // px
+  maxSize: 360,            // px
+  minDur: 16,              // s (float animation)
+  maxDur: 28,              // s
+  minHueDur: 18,           // s (hue animation)
+  maxHueDur: 30,           // s
+  edgePadding: 6,          // % away from edges
+  parallax: 10,            // px max shift from mouse
 };
 
+// Create once
 function initBlobs() {
   if (!ROOT) return;
   ROOT.dataset.density = 'medium';
@@ -28,7 +30,7 @@ function initBlobs() {
     el.style.setProperty('--sz', `${sz}px`);
     el.style.setProperty('--x', `${pos.x}px`);
     el.style.setProperty('--y', `${pos.y}px`);
-    el.style.setProperty('--rot', `${rand(-7, 7)}deg`);
+    el.style.setProperty('--rot', `${rand(-6, 6)}deg`);
     el.style.setProperty('--dur', `${rand(CONFIG.minDur, CONFIG.maxDur)}s`);
     el.style.setProperty('--huedur', `${rand(CONFIG.minHueDur, CONFIG.maxHueDur)}s`);
 
@@ -43,6 +45,7 @@ function rand(min, max) {
 }
 
 function randPos(padPercent = 6) {
+  // place in viewport-ish coordinates then center via translate(-50%,-50%)
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const padX = vw * (padPercent / 100);
@@ -60,8 +63,8 @@ function attachParallax() {
   const onMove = (e) => {
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
-    const dx = (e.clientX - cx) / cx;
-    const dy = (e.clientY - cy) / cy;
+    const dx = (e.clientX - cx) / cx; // -1..1
+    const dy = (e.clientY - cy) / cy; // -1..1
     targetX = dx * max;
     targetY = dy * max;
     if (!rafId) rafId = requestAnimationFrame(applyParallax);
@@ -71,9 +74,14 @@ function attachParallax() {
     rafId = null;
     const blobs = ROOT.querySelectorAll('.blob');
     blobs.forEach((b, i) => {
-      const depth = (i + 1) / (blobs.length + 1);
+      // layered feel: farther blobs move less
+      const depth = (i + 1) / (blobs.length + 1); // 0..1
       const px = (targetX * depth).toFixed(2);
       const py = (targetY * depth).toFixed(2);
+
+      // base position stored in --x/--y; we add a parallax offset via CSS transform compose
+      // Trick: we modify a CSS variable that the base transform uses implicitly.
+      // Simpler: add an extra translate via style.transform for better perf
       const base = `translate(-50%,-50%) translate3d(var(--x,0), var(--y,0),0) rotate(var(--rot,0deg))`;
       b.style.transform = `${base} translate(${px}px, ${py}px)`;
     });
@@ -81,6 +89,7 @@ function attachParallax() {
 
   window.addEventListener('pointermove', onMove, { passive: true });
 
+  // On resize, gently re-scatter positions
   let resizeTimer = null;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
@@ -91,7 +100,7 @@ function attachParallax() {
         b.style.setProperty('--x', `${pos.x}px`);
         b.style.setProperty('--y', `${pos.y}px`);
       });
-    }, 160);
+    }, 180);
   });
 }
 
