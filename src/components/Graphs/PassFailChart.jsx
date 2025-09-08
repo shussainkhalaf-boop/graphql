@@ -1,8 +1,11 @@
 import React from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 
-function PassFailChart({ passCount, failCount }) {
-  const data = [
+function PassFailChart({ data }) {
+  const passCount = data.filter(item => item.grade >= 1).length;
+  const failCount = data.filter(item => item.grade < 1).length;
+
+  const chartData = [
     { name: 'PASS', value: passCount },
     { name: 'FAIL', value: failCount },
   ];
@@ -10,16 +13,16 @@ function PassFailChart({ passCount, failCount }) {
   const COLORS = ['#34d399', '#f87171'];
 
   return (
-    <PieChart  width={500} height={400}>
+    <PieChart width={500} height={400}>
       <Pie
-        data={data}
+        data={chartData}
         cx="50%"
         cy="50%"
         outerRadius={150}
         label={(entry) => `${entry.name}: ${entry.value}`}
         dataKey="value"
       >
-        {data.map((entry, index) => (
+        {chartData.map((entry, index) => (
           <Cell key={`cell-${index}`} fill={COLORS[index]} />
         ))}
       </Pie>
