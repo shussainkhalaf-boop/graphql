@@ -21,6 +21,12 @@ function formatXP(bytes) {
   return bytes + ' B';
 }
 
+function formatDate(dateString) {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  return date.toLocaleDateString();
+}
+
 function Profile() {
   const { data: userData } = useQuery(GET_USER_INFO);
   const [userId, setUserId] = useState(null);
@@ -44,10 +50,7 @@ function Profile() {
   const moduleOnlyXP = totalXP - piscineGoXP; // نخصم piscine-go فقط
 
   const programStartDate = programStartData?.transaction?.[0]?.createdAt;
-  const formattedProgramDate = programStartDate ? new Date(programStartDate).toLocaleDateString() : 'N/A';
-
   const accountCreatedDate = userData?.user?.[0]?.createdAt;
-  const formattedAccountDate = accountCreatedDate ? new Date(accountCreatedDate).toLocaleDateString() : 'N/A';
 
   const projects = [...(projectsData?.transaction || [])].sort(
     (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
@@ -62,8 +65,8 @@ function Profile() {
           <p><strong>Login:</strong> {userData.user[0].login}</p>
           <p><strong>Email:</strong> {userData.user[0].email}</p>
           <p><strong>ID:</strong> {userData.user[0].id}</p>
-          <p><strong>Account Created:</strong> {formattedAccountDate}</p>
-          <p><strong>Program Start:</strong> {formattedProgramDate}</p>
+          <p><strong>Account Created:</strong> {formatDate(accountCreatedDate)}</p>
+          <p><strong>Started Program:</strong> {formatDate(programStartDate)}</p>
           <p><strong>Total XP (excluding piscine-go):</strong> {formatXP(moduleOnlyXP)}</p>
         </div>
       )}
@@ -73,7 +76,7 @@ function Profile() {
         <ul className="list-disc list-inside mb-6">
           {projects.map((p, i) => (
             <li key={i}>
-              {p.object?.name} - {formatXP(p.amount)} - {new Date(p.createdAt).toLocaleDateString()}
+              {p.object?.name} - {formatXP(p.amount)} - {formatDate(p.createdAt)}
             </li>
           ))}
         </ul>
