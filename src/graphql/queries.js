@@ -1,6 +1,6 @@
 import { gql } from '@apollo/client';
 
-// ✅ معلومات المستخدم مع createdAt لحساب تاريخ إنشاء الحساب
+// ✅ 
 export const GET_USER_INFO = gql`
   query GetUserInfo {
     user {
@@ -12,7 +12,7 @@ export const GET_USER_INFO = gql`
   }
 `;
 
-// ✅ مجموع XP
+// ✅  XP
 export const GEt_Total_XPInKB = gql`
   query GetTotalXP($userId: Int!) {
     transaction_aggregate(
@@ -30,7 +30,7 @@ export const GEt_Total_XPInKB = gql`
   }
 `;
 
-// ✅ XP الخاص بـ piscine-go
+// ✅ XP piscine-go
 export const GET_PISCINE_GO_XP = gql`
   query GetPiscineGoXP($userId: Int!) {
     transaction_aggregate(
@@ -49,7 +49,7 @@ export const GET_PISCINE_GO_XP = gql`
   }
 `;
 
-// ✅ XP الخاص بـ piscine-js
+// ✅ XP piscine-js
 export const GET_PISCINE_JS_XP = gql`
   query GetPiscineJsXP($userId: Int!) {
     transaction_aggregate(
@@ -68,7 +68,7 @@ export const GET_PISCINE_JS_XP = gql`
   }
 `;
 
-// ✅ جميع المشاريع بالـ XP
+// ✅ XP
 export const GET_PROJECTS_WITH_XP = gql`
   query GetProjectXP($userId: Int!) {
     transaction(
@@ -87,7 +87,7 @@ export const GET_PROJECTS_WITH_XP = gql`
   }
 `;
 
-// ✅ النسبة بين المشاريع الناجحة والفاشلة
+// ✅ 
 export const GET_PROJECTS_PASS_FAIL = gql`
   query GetProjectsPassFail($userId: Int!) {
     progress(
