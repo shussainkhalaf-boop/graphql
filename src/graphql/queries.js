@@ -1,85 +1,137 @@
-import { gql } from "@apollo/client";
+// js/queries.js
+// All queries used by the app (kept simple, Hasura-compatible).
 
-/**
- * Pull everything we need in one request:
- * - user.createdAt (Created Account)
- * - audits up/down totals (Audit Ratio)
- * - earliest bh-module XP (Started Program)
- * - latest attempt per project (for pass/fail + finished list)
- */
-export const Q_DASH = gql`
-  query Dash($userId: Int!) {
-    user(where: { id: { _eq: $userId } }) {
+export const Q_ME = `
+  query Me {
+    user {
       id
       login
       email
-      firstName
-      lastName
       createdAt
     }
+  }
+`;
 
-    up: transaction_aggregate(
-      where: { userId: { _eq: $userId }, type: { _eq: "up" } }
-    ) {
-      aggregate {
-        sum {
-          amount
-        }
-      }
-    }
-
-    down: transaction_aggregate(
-      where: { userId: { _eq: $userId }, type: { _eq: "down" } }
-    ) {
-      aggregate {
-        sum {
-          amount
-        }
-      }
-    }
-
-    # Started Program = earliest XP inside bh-module
-    startBh: transaction_aggregate(
+// Earliest XP that belongs to the "bh-module" program for correct Started Program date
+export const Q_FIRST_BH_MODULE_XP = `
+  query FirstBhModuleXP($userId: Int!) {
+    transaction(
       where: {
         userId: { _eq: $userId }
         type: { _eq: "xp" }
         path: { _ilike: "%bh-module%" }
       }
-    ) {
-      aggregate {
-        min {
-          createdAt
-        }
-      }
-    }
+      order_by: { createdAt: asc }
+      limit: 1
+    ) { id createdAt path amount }
+  }
+`;
 
-    # Fallback if user has no bh-module xp yet: earliest xp overall
-    startAny: transaction_aggregate(
-      where: { userId: { _eq: $userId }, type: { _eq: "xp" } }
-    ) {
-      aggregate {
-        min {
-          createdAt
-        }
+// Fallback if no bh-module records were found: earliest XP of any type= xp
+export const Q_FIRST_XP_ANY = `
+  query FirstAnyXP($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId }
+        type: { _eq: "xp" }
       }
-    }
+      order_by: { createdAt: asc }
+      limit: 1
+    ) { id createdAt path amount }
+  }
+`;
 
-    # Latest attempt per project (Hasura: distinct_on + order_by)
-    projects: progress(
-      distinct_on: objectId
-      order_by: [{ objectId: asc }, { updatedAt: desc }]
+// Completed projects list (grade=1) with proper object type filter
+export const Q_COMPLETED_PROJECTS = `
+  query CompletedProjects($userId: Int!) {
+    progress(
+      where: {
+        userId: { _eq: $userId }
+        grade: { _eq: 1 }
+        object: { type: { _eq: "project" } }
+      }
+      order_by: { updatedAt: desc }
+    ) {
+      objectId
+      grade
+      updatedAt
+      path
+      object { id name type }
+    }
+  }
+`;
+
+// Projects Pass count
+export const Q_PROJECT_PASS_CNT = `
+  query ProjectPassCnt($userId: Int!) {
+    progress_aggregate(
       where: {
         userId: { _eq: $userId }
         object: { type: { _eq: "project" } }
+        grade: { _eq: 1 }
       }
+    ) { aggregate { count } }
+  }
+`;
+
+// Projects Fail count
+export const Q_PROJECT_FAIL_CNT = `
+  query ProjectFailCnt($userId: Int!) {
+    progress_aggregate(
+      where: {
+        userId: { _eq: $userId }
+        object: { type: { _eq: "project" } }
+        grade: { _eq: 0 }
+      }
+    ) { aggregate { count } }
+  }
+`;
+
+// If your instance exposes "result" with similar semantics, we try it too (optional):
+export const Q_RESULT_PASS_FAIL = `
+  query ResultPassFail($userId: Int!) {
+    pass: result_aggregate(
+      where: {
+        userId: { _eq: $userId }
+        grade: { _eq: 1 }
+        object: { type: { _eq: "project" } }
+      }
+    ) { aggregate { count } }
+    fail: result_aggregate(
+      where: {
+        userId: { _eq: $userId }
+        grade: { _eq: 0 }
+        object: { type: { _eq: "project" } }
+      }
+    ) { aggregate { count } }
+  }
+`;
+
+// XP over time per project (sum per object with updatedAt)
+// You can also drive a line chart with transaction xp points if you prefer.
+export const Q_XP_BY_PROJECT = `
+  query XPByProject($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId }
+        type: { _eq: "xp" }
+      }
+      order_by: { createdAt: asc }
     ) {
-      objectId
-      grade          # 1 = PASS, 0 = FAIL
-      updatedAt      # تاريخ الإنهاء الفعلي
-      createdAt      # تاريخ الإنشاء (احتياطي)
-      object {
-        name
-      }
+      id amount createdAt objectId path
+      object { id name type }
     }
+  }
+`;
+
+// Audit "up" vs "down" (performed vs received) — classic audit ratio
+export const Q_AUDIT_UP_DOWN = `
+  query AuditUpDown($userId: Int!) {
+    up: transaction_aggregate(
+      where: { userId: { _eq: $userId }, type: { _eq: "up" } }
+    ) { aggregate { sum { amount } count } }
+    down: transaction_aggregate(
+      where: { userId: { _eq: $userId }, type: { _eq: "down" } }
+    ) { aggregate { sum { amount } count } }
   }
 `;
