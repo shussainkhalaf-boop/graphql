@@ -1,7 +1,8 @@
 import { gql } from '@apollo/client';
 
+// Normal Query: get user info
 export const GET_USER_INFO = gql`
-  query {
+  query GetUserDetails {
     user {
       id
       login
@@ -14,24 +15,26 @@ export const GET_USER_INFO = gql`
   }
 `;
 
+// Argument-based Query: get total xp
 export const GEt_Total_XPInKB = gql`
-  query ($userId: Int!) {
-    transaction_aggregate(where: { userId: { _eq: $userId }, type: { _eq: "xp" } }) {
-      aggregate {
-        sum {
-          amount
-        }
+query GetTotalXPInKB($userId: Int!) {
+  transaction_aggregate(where: { userId: { _eq: $userId }, type: { _eq: "xp" } }) {
+    aggregate {
+      sum {
+        amount
       }
     }
   }
+}
 `;
 
+// Query to calculate piscineGoXP
 export const GET_PISCINE_GO_XP = gql`
-  query ($userId: Int!) {
+  query GetPiscineGoXP($userId: Int!) {
     transaction(
       where: {
-        userId: { _eq: $userId }
-        type: { _eq: "xp" }
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
         path: { _like: "%bh-piscine%" }
       }
     ) {
@@ -40,13 +43,15 @@ export const GET_PISCINE_GO_XP = gql`
   }
 `;
 
+
+// Query to calculate piscineJsXP
 export const GET_PISCINE_JS_XP = gql`
-  query ($userId: Int!) {
+  query GetPiscineJsXP($userId: Int!) {
     transaction_aggregate(
       where: {
-        userId: { _eq: $userId }
-        type: { _eq: "xp" }
-        event: { path: { _like: "%piscine-js%" } }
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
+        event: {path: { _like: "%piscine-js%" }}
       }
     ) {
       aggregate {
@@ -58,13 +63,14 @@ export const GET_PISCINE_JS_XP = gql`
   }
 `;
 
+
+// Query to calculate projectXP from bhmodule
 export const GET_PROJECT_XP = gql`
-  query ($userId: Int!) {
+  query {
     transaction_aggregate(
       where: {
-        userId: { _eq: $userId }
-        type: { _eq: "xp" }
         event: { path: { _eq: "/bahrain/bh-module" } }
+        type: { _eq: "xp" }
       }
     ) {
       aggregate {
@@ -74,17 +80,20 @@ export const GET_PROJECT_XP = gql`
       }
     }
   }
+
 `;
+
+
 
 export const GET_PROJECTS_WITH_XP = gql`
-  query ($userId: Int!) {
+  query GetProjectsAndXP($userId: Int!) {
     transaction(
       where: {
-        userId: { _eq: $userId }
-        type: { _eq: "xp" }
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
         object: { type: { _eq: "project" } }
       }
-      order_by: { createdAt: asc }
+        order_by: { createdAt: asc }
     ) {
       id
       object {
@@ -97,51 +106,33 @@ export const GET_PROJECTS_WITH_XP = gql`
 `;
 
 export const GET_PROJECTS_PASS_FAIL = gql`
-  query ($userId: Int!) {
-    progress(
-      where: {
-        userId: { _eq: $userId }
-        object: { type: { _eq: "project" } }
-      }
-    ) {
+  query GetProjectsPassFail($userId: Int!) {
+    progress(where: { userId: { _eq: $userId }, object: { type: { _eq: "project" } } }) {
       grade
     }
   }
 `;
 
-export const GET_LATEST_PROJECTS_WITH_XP = gql`
-  query ($userId: Int!) {
-    transaction(
-      where: {
-        userId: { _eq: $userId }
-        type: { _eq: "xp" }
-        object: { type: { _eq: "project" } }
-      }
-      order_by: { createdAt: desc }
-      limit: 12
-    ) {
-      id
-      object {
-        name
-      }
-      amount
-      createdAt
+export const GET_LATEST_PROJECTS_WITH_XP =gql`query GetLatestProjectsAndXP($userId: Int!) {
+  transaction(
+    where: {
+      userId: { _eq: $userId },
+      type: { _eq: "xp" },
+      object: { type: { _eq: "project" } }
     }
+    order_by: { createdAt: desc }
+    limit: 12
+  ) {
+    id
+    object {
+      name
+    }
+    amount
+    createdAt
   }
-`;
+}
+  `;
 
-export const GET_PROGRAM_START_DATE = gql`
-  query ($userId: Int!) {
-    transaction(
-      where: {
-        userId: { _eq: $userId },
-        type: { _eq: "xp" },
-        event: { path: { _eq: "/bahrain/bh-module" } }
-      }
-      order_by: { createdAt: asc }
-      limit: 1
-    ) {
-      createdAt
-    }
-  }
-`;
+
+
+
