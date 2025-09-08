@@ -1,178 +1,238 @@
-import React, { useEffect, useState } from 'react';
+// src/components/Profile.jsx
+import React, { useMemo } from 'react';
 import { useQuery } from '@apollo/client';
 import {
   GET_USER_INFO,
-  GEt_Total_XPInKB,
+  Q_TOTAL_XP,
+  Q_PISCINE_GO_XP,
+  Q_PISCINE_JS_XP,
   GET_PROJECTS_WITH_XP,
-  GET_PROJECTS_PASS_FAIL,
-  GET_LATEST_PROJECTS_WITH_XP,GET_PISCINE_GO_XP, GET_PISCINE_JS_XP, GET_PROJECT_XP
+  Q_LAST_DATES,
+  Q_RESULTS_GRADES,
 } from '../graphql/queries';
-import PassFailChart from './Graphs/PassFailChart';
-import XPByProjectChart from './Graphs/XPByProjectChart';
 
-function Profile() {
-  const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
-  const [userId, setUserId] = useState(null);
+// ---- Helpers ----
+const TZ = 'Asia/Bahrain';
 
-  useEffect(() => {
-    if (userData && userData.user && userData.user.length > 0) {
-      setUserId(userData.user[0].id);
+function kb(n) {
+  return Math.round((Number(n || 0)) / 1024);
+}
+
+// Total in MB; if ≥ 1000 MB, switch to GB (two decimals)
+function formatMBorGB(bytes, digits = 2) {
+  const b = Number(bytes || 0);
+  const mb = b / (1024 * 1024);
+  if (!Number.isFinite(mb)) return { value: '0.00', unit: 'MB' };
+  if (mb >= 1000) {
+    const gb = b / (1024 * 1024 * 1024);
+    return { value: gb.toFixed(digits), unit: 'GB' };
     }
-  }, [userData]);
+  return { value: mb.toFixed(digits), unit: 'MB' };
+}
 
-  const { data: xpdata, loading: xpLoading, error: xpError } = useQuery(GEt_Total_XPInKB, { variables: { userId } });
-  const { data: piscineGoXPData, loading: piscineGoXPLoading, error: piscineGoXPError } = useQuery(GET_PISCINE_GO_XP, { variables: { userId }, });
-  const { data: piscineJsXPData, loading: piscineJsXPLoading, error: piscineJsXPError } = useQuery(GET_PISCINE_JS_XP, { variables: { userId }, });
-  const { data: projectXPData, loading: projectXPLoading, error: projectXPError } = useQuery(GET_PROJECT_XP, { variables: { userId },});
-  const { data: projectsData, loading: projectsLoading, error: projectsError } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId } });
-  const { data: passFailData, loading: passFailLoading, error: passFailError } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId } });
-  const { data: latestProjectsData, loading: latestProjectsLoading, error: latestProjectsError } = useQuery(GET_LATEST_PROJECTS_WITH_XP, { variables: { userId } });
+function formatInt(n) {
+  return new Intl.NumberFormat().format(Number(n || 0));
+}
 
-  if (userLoading || xpLoading || projectsLoading || passFailLoading || latestProjectsLoading || piscineGoXPLoading || piscineJsXPLoading || projectXPLoading) {
-    return <div className="text-center text-purple-500 font-bold">Loading...</div>;
+function formatDate(d, withTime = false) {
+  if (!d) return '—';
+  const opts = withTime
+    ? { dateStyle: 'medium', timeStyle: 'short', timeZone: TZ }
+    : { dateStyle: 'medium', timeZone: TZ };
+  try {
+    const dt = typeof d === 'string' ? new Date(d) : d;
+    return new Intl.DateTimeFormat('en-GB', opts).format(dt);
+  } catch {
+    return '—';
   }
+}
 
-  if (userError || xpError || projectsError || passFailError || latestProjectsError || piscineGoXPError || piscineJsXPError || projectXPError) {
-    return <div className="text-center text-red-500 font-bold">Error loading data.</div>;
+// Robust pass/fail inference from result.grade
+function isPassGrade(grade) {
+  const g = grade;
+  if (typeof g === 'boolean') return g;
+  if (typeof g === 'number') return g > 0;
+  if (typeof g === 'string') {
+    const s = g.trim().toLowerCase();
+    return ['ok', 'pass', 'passed', 'success', 'successful', 'true', '1'].includes(s);
   }
+  return false;
+}
 
-  const currentUser = userData?.user[0] || {};
-  const piscineGoXPTotal = piscineGoXPData?.transaction.reduce((sum, tx) => sum + tx.amount, 0) / 1000 || 0;
-  const piscineJsXPTotal = (piscineJsXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0)/1000;
-  const projectXPTotal = (projectXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
-  const projects = projectsData?.transaction || [];
-  const passCount = passFailData.progress.filter((item) => item.grade !== null && item.grade >= 1).length;
-  const failCount = passFailData.progress.filter((item) => item.grade !== null && item.grade < 1).length;
-
-  const totalXP = xpdata?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  const totalXPInKB = (totalXP / 1000).toFixed(2);
-
-  const latestProjects = latestProjectsData?.transaction || [];
-
-  const handleLogout = () => {
-    if (window.confirm("Are you sure you want to log out?")) {
-      localStorage.removeItem("token");
-      window.location.href = "/login";
-    }
-  };
-  
-
+// Card stat component
+function Stat({ label, value }) {
   return (
-    <div className="profile-bg">
-    <div className="container mx-auto p-4 bg-gray-100 bg-opacity-20">
-      <header className="flex justify-between items-center mb-6 bg-purple-700 text-white p-4 rounded-lg shadow-lg">
-        <h1 className="text-3xl font-bold">School Profile</h1>
-        <button
-          onClick={handleLogout}
-          className="bg-red-500 text-white px-4 py-2 rounded shadow hover:bg-red-600 transition"
-        >
-          Logout
-        </button>
-      </header>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 space-y-6">
-          {/* Basic Info Section */}
-          <div className="bg-white shadow-lg rounded-lg overflow-hidden">
-            <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
-              <h3 className="text-lg leading-6 font-medium">Basic Information</h3>
-            </div>
-            <div className="border-t border-gray-200">
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 py-5">
-                <div className="flex items-center space-x-4 col-span-2 sm:col-span-1">
-                  <div className="h-20 w-20 rounded-full bg-purple-500 flex items-center justify-center text-2xl font-bold text-white">
-                    {currentUser.firstName && currentUser.lastName
-                      ? `${currentUser.firstName[0]}${currentUser.lastName[0]}`
-                      : currentUser.login?.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900">{currentUser.firstName} {currentUser.lastName}</h2>
-                    <p className="text-purple-600">@{currentUser.login}</p>
-                  </div>
-                </div>
-                <div className="space-y-2 col-span-2 sm:col-span-1">
-                  <p><span className="font-semibold text-purple-600">ID:</span> {currentUser.id}</p>
-                  <p><span className="font-semibold text-purple-600">Email:</span> {currentUser.email}</p>
-                  <p><span className="font-semibold text-purple-600">Started Program:</span> {new Date(currentUser.updatedAt).toLocaleDateString()}</p>
-                  <p><span className="font-semibold text-purple-600">Account Created:</span> {new Date(currentUser.createdAt).toLocaleDateString()}</p>
-                </div>
-              </dl>
-            </div>
-          </div>
-
-          {/* XP Summary Section */}
-          <div className="bg-white shadow-lg rounded-lg overflow-hidden">
-            <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
-              <h3 className="text-lg leading-6 font-medium">XP Summary</h3>
-            </div>
-            <div className="border-t border-gray-200 px-4 py-5">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <div className="col-span-2 sm:col-span-3">
-                  <p className="text-lg font-semibold text-purple-700">Total XP: {totalXPInKB} KB</p>
-                </div>
-                <div>
-                  <p className="font-semibold text-purple-600">Piscine Go XP</p>
-                  <p>{piscineGoXPTotal.toFixed(2)} KB</p>
-                </div>
-                <div>
-                  <p className="font-semibold text-purple-600">Piscine JS XP</p>
-                  <p>{piscineJsXPTotal.toFixed(2)} KB</p>
-                </div>
-                <div>
-                  <p className="font-semibold text-purple-600">Project XP</p>
-                  <p>{projectXPTotal.toFixed(2)} KB</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Finished Projects Section */}
-        <div className="bg-white shadow-lg rounded-lg overflow-hidden">
-          <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
-            <h3 className="text-lg leading-6 font-medium">Finished Projects</h3>
-          </div>
-          <div className="border-t border-gray-200">
-            <div className="finished-projects-container px-4 py-5 h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500 scrollbar-track-gray-200">
-              {projects.map((project, index) => (
-                <div key={project.id} className="mb-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{project.object?.name}</h3>
-                      <p className="text-sm text-gray-500">
-                        Completed: {new Date(project.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                      {(project.amount / 1000).toFixed(2)} KB
-                    </span>
-                  </div>
-                  {index < projects.length - 1 && <hr className="my-2 border-gray-200" />}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-{/* Charts Section */}
-<div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-  <div className="bg-white p-6 rounded-lg shadow-lg w-full">
-    <h2 className="text-xl font-bold mb-4 text-purple-700">XP by Latest 12 Projects</h2>
-    <div className="w-full h-[500px]">
-      <XPByProjectChart projects={latestProjects} />
-    </div>
-  </div>
-  <div className="bg-white p-6 rounded-lg shadow-lg w-full">
-    <h2 className="text-xl font-bold mb-4 text-purple-700">Projects PASS and FAIL Ratio</h2>
-    <div className="flex justify-center items-center">
-      <PassFailChart passCount={passCount} failCount={failCount} />
-    </div>
-  </div>
-</div>
-    </div>
+    <div className="rounded-2xl p-4 bg-white/60 dark:bg-slate-900/50 shadow-sm border border-slate-200/50 dark:border-slate-700/50">
+      <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums break-words">{value}</div>
     </div>
   );
 }
 
-export default Profile;
+export default function Profile() {
+  // 1) User (for id + created/updated)
+  const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
+  const user = userData?.user?.[0] || null;
+  const userId = user?.id ?? null;
+
+  // 2) Aggregates
+  const { data: totalAgg, loading: totalLoading, error: totalErr } = useQuery(Q_TOTAL_XP, {
+    skip: !userId,
+    variables: { userId },
+    fetchPolicy: 'cache-first',
+  });
+  const { data: goAgg, loading: goLoading, error: goErr } = useQuery(Q_PISCINE_GO_XP, {
+    skip: !userId,
+    variables: { userId },
+    fetchPolicy: 'cache-first',
+  });
+  const { data: jsAgg, loading: jsLoading, error: jsErr } = useQuery(Q_PISCINE_JS_XP, {
+    skip: !userId,
+    variables: { userId },
+    fetchPolicy: 'cache-first',
+  });
+
+  // 3) Latest activity timestamps ("Last Updated")
+  const { data: lastAgg, loading: lastLoading, error: lastErr } = useQuery(Q_LAST_DATES, {
+    skip: !userId,
+    variables: { userId },
+    fetchPolicy: 'cache-first',
+  });
+
+  // 4) Results for pass/fail %
+  const { data: resData, loading: resLoading, error: resErr } = useQuery(Q_RESULTS_GRADES, {
+    skip: !userId,
+    variables: { userId, limit: 2000 },
+    fetchPolicy: 'cache-first',
+  });
+
+  // 5) Projects (display-only)
+  const { data: projData } = useQuery(GET_PROJECTS_WITH_XP, {
+    skip: !userId,
+    variables: { userId, limit: 50 },
+    fetchPolicy: 'cache-first',
+  });
+
+  // --- Extract values (bytes) ---
+  const totalBytes = totalAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+  const piscineGoBytes = goAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+  const piscineJsBytes = jsAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+
+  // Module XP = Total - Piscine GO (keep JS in the module)
+  const moduleBytes = Math.max(0, Number(totalBytes) - Number(piscineGoBytes));
+
+  // Display conversions
+  const totalDynamic = formatMBorGB(totalBytes);              // Total in MB/GB
+  const goKB = formatInt(kb(piscineGoBytes));                 // KB
+  const jsKB = formatInt(kb(piscineJsBytes));                 // KB
+  const moduleKB = formatInt(kb(moduleBytes));                // KB
+
+  // Program Start & Last Updated
+  const programStart = user?.createdAt ? new Date(user.createdAt) : null;
+  const lastCandidates = [
+    user?.updatedAt,
+    lastAgg?.transaction_aggregate?.aggregate?.max?.updatedAt,
+    lastAgg?.transaction_aggregate?.aggregate?.max?.createdAt,
+    lastAgg?.result_aggregate?.aggregate?.max?.updatedAt,
+    lastAgg?.result_aggregate?.aggregate?.max?.createdAt,
+  ]
+    .filter(Boolean)
+    .map((x) => Date.parse(x))
+    .filter((x) => Number.isFinite(x));
+  const lastUpdated =
+    lastCandidates.length > 0 ? new Date(Math.max(...lastCandidates)) : (user?.updatedAt ? new Date(user.updatedAt) : null);
+
+  // Pass / Fail %
+  const results = resData?.result ?? [];
+  const totalResults = results.length;
+  const passCount = results.reduce((acc, r) => (isPassGrade(r?.grade) ? acc + 1 : acc), 0);
+  const failCount = totalResults - passCount;
+  const passPct = totalResults ? Math.round((passCount / totalResults) * 100) : 0;
+  const failPct = totalResults ? 100 - passPct : 0;
+
+  // Projects table rows
+  const projRows = useMemo(() => {
+    const list = projData?.transaction ?? [];
+    return list.slice(0, 10).map((t) => ({
+      name: t?.object?.name || 'Unknown',
+      xpKB: formatInt(Math.round((Number(t?.amount || 0)) / 1024)),
+      date: t?.createdAt ? formatDate(t.createdAt, false) : '—',
+    }));
+  }, [projData]);
+
+  const anyLoading = userLoading || totalLoading || goLoading || jsLoading || lastLoading || resLoading;
+  const anyError = userError || totalErr || goErr || jsErr || lastErr || resErr;
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold">Profile</h1>
+        {user && (
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+            {user.firstName || ''} {user.lastName || ''} — <span className="font-mono">{user.login}</span>
+          </p>
+        )}
+      </header>
+
+      {anyLoading && <div className="animate-pulse text-slate-500">Loading…</div>}
+      {anyError && (
+        <div className="text-red-600">
+          Failed to fetch data. Please check your connection and JWT.
+        </div>
+      )}
+
+      {!anyLoading && !anyError && (
+        <>
+          {/* Dates & Success ratio */}
+          <section className="grid gap-4 md:grid-cols-4 mb-6">
+            <Stat label="Program Start" value={formatDate(programStart, false)} />
+            <Stat label="Last Updated" value={formatDate(lastUpdated, true)} />
+            <Stat label="Pass %" value={`${passPct}%`} />
+            <Stat label="Fail %" value={`${failPct}%`} />
+          </section>
+
+          {/* XP stats */}
+          <section className="grid gap-4 md:grid-cols-4">
+            <Stat label={`Total XP (${totalDynamic.unit})`} value={totalDynamic.value} />
+            <Stat label="Piscine GO (KB)" value={goKB} />
+            <Stat label="Piscine JS (KB)" value={jsKB} />
+            <Stat label="Module XP (KB) = Total - GO" value={moduleKB} />
+          </section>
+
+          {/* Projects list (display only) */}
+          <section className="mt-8">
+            <h2 className="text-lg font-semibold mb-3">Latest Project XP Transactions</h2>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-800/50">
+                  <tr>
+                    <th className="text-left p-3">Project</th>
+                    <th className="text-left p-3">XP (KB)</th>
+                    <th className="text-left p-3">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {projRows.length === 0 && (
+                    <tr>
+                      <td className="p-3" colSpan={3}>No data.</td>
+                    </tr>
+                  )}
+                  {projRows.map((r, i) => (
+                    <tr key={i} className="odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-900 dark:even:bg-slate-800/30">
+                      <td className="p-3">{r.name}</td>
+                      <td className="p-3 tabular-nums">{r.xpKB}</td>
+                      <td className="p-3">{r.date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-slate-500 mt-2">
+              Note: This list is for display only (limit=50). Real totals come from aggregate queries.
+            </p>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
