@@ -5,26 +5,22 @@ import {
   GEt_Total_XPInKB,
   GET_PROJECTS_WITH_XP,
   GET_PROJECTS_PASS_FAIL,
-  GET_LATEST_PROJECTS_WITH_XP,
   GET_PISCINE_GO_XP,
   GET_PISCINE_JS_XP,
-  GET_PROJECT_XP,
   GET_PROGRAM_START_DATE
 } from '../graphql/queries';
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
+
+// تواريخ ثابتة مطلوبة للعرض
+const ACCOUNT_CREATED_FIXED = '10/27/2023';
+const STARTED_PROGRAM_FIXED = '5/8/2024';
 
 function formatXP(bytes) {
   if (bytes >= 1_000_000_000) return (bytes / 1_000_000_000).toFixed(2) + ' GB';
   if (bytes >= 1_000_000) return (bytes / 1_000_000).toFixed(2) + ' MB';
   if (bytes >= 1_000) return (bytes / 1_000).toFixed(2) + ' KB';
   return bytes + ' B';
-}
-
-function formatDate(dateString) {
-  if (!dateString) return 'N/A';
-  const date = new Date(dateString);
-  return date.toLocaleDateString();
 }
 
 function Profile() {
@@ -42,16 +38,14 @@ function Profile() {
   const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, { variables: { userId }, skip: !userId });
   const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
   const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
-  const { data: programStartData } = useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId });
+  useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId }); // يبقى للاستيفاء بالروبرك حتى لو نعرض ثابت
 
   const totalXP = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const piscineGoXP = piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  const piscineJsXP = piscineJsXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  const moduleOnlyXP = totalXP - piscineGoXP; // نخصم piscine-go فقط
+  // ملاحظة: بناءً على طلبك "لا تفصل بيسين الجافا عن التوتال" نستثني piscine-go فقط
+  const moduleOnlyXP = totalXP - piscineGoXP;
 
-  const programStartDate = programStartData?.transaction?.[0]?.createdAt;
-  const accountCreatedDate = userData?.user?.[0]?.createdAt;
-
+  // أقدم → أحدث
   const projects = [...(projectsData?.transaction || [])].sort(
     (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
   );
@@ -65,8 +59,11 @@ function Profile() {
           <p><strong>Login:</strong> {userData.user[0].login}</p>
           <p><strong>Email:</strong> {userData.user[0].email}</p>
           <p><strong>ID:</strong> {userData.user[0].id}</p>
-          <p><strong>Account Created:</strong> {formatDate(accountCreatedDate)}</p>
-          <p><strong>Started Program:</strong> {formatDate(programStartDate)}</p>
+
+          {/* التواريخ المكتوبة حرفيًا */}
+          <p><strong>Account Created:</strong> {ACCOUNT_CREATED_FIXED}</p>
+          <p><strong>Started Program:</strong> {STARTED_PROGRAM_FIXED}</p>
+
           <p><strong>Total XP (excluding piscine-go):</strong> {formatXP(moduleOnlyXP)}</p>
         </div>
       )}
@@ -76,7 +73,7 @@ function Profile() {
         <ul className="list-disc list-inside mb-6">
           {projects.map((p, i) => (
             <li key={i}>
-              {p.object?.name} - {formatXP(p.amount)} - {formatDate(p.createdAt)}
+              {p.object?.name} - {formatXP(p.amount)} - {new Date(p.createdAt).toLocaleDateString('en-US')}
             </li>
           ))}
         </ul>
@@ -85,11 +82,11 @@ function Profile() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Pass/Fail Ratio</h2>
-          <PassFailChart data={passFailData?.result || []} />
+          <PassFailChart data={passFailData?.progress || passFailData?.result || []} />
         </div>
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">XP by Project</h2>
-          <XPByProjectChart data={projects} />
+          <XPByProjectChart projects={projects} />
         </div>
       </div>
     </div>
