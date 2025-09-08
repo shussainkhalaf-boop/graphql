@@ -1,5 +1,6 @@
 import { gql } from '@apollo/client';
 
+// ✅ معلومات المستخدم مع createdAt لحساب تاريخ إنشاء الحساب
 export const GET_USER_INFO = gql`
   query GetUserInfo {
     user {
@@ -11,12 +12,15 @@ export const GET_USER_INFO = gql`
   }
 `;
 
-export const GET_TOTAL_XP = gql`
+// ✅ مجموع XP
+export const GEt_Total_XPInKB = gql`
   query GetTotalXP($userId: Int!) {
-    transaction_aggregate(where: {
-      userId: { _eq: $userId }
-      type: { _eq: "xp" }
-    }) {
+    transaction_aggregate(
+      where: {
+        userId: { _eq: $userId },
+        type: { _eq: "xp" }
+      }
+    ) {
       aggregate {
         sum {
           amount
@@ -26,13 +30,16 @@ export const GET_TOTAL_XP = gql`
   }
 `;
 
+// ✅ XP الخاص بـ piscine-go
 export const GET_PISCINE_GO_XP = gql`
   query GetPiscineGoXP($userId: Int!) {
-    transaction_aggregate(where: {
-      userId: { _eq: $userId },
-      type: { _eq: "xp" },
-      path: { _ilike: "%/piscine-go/%" }
-    }) {
+    transaction_aggregate(
+      where: {
+        userId: { _eq: $userId },
+        path: { _like: "%piscine-go%" },
+        type: { _eq: "xp" }
+      }
+    ) {
       aggregate {
         sum {
           amount
@@ -42,64 +49,51 @@ export const GET_PISCINE_GO_XP = gql`
   }
 `;
 
+// ✅ XP الخاص بـ piscine-js
 export const GET_PISCINE_JS_XP = gql`
   query GetPiscineJsXP($userId: Int!) {
-    transaction_aggregate(where: {
-      userId: { _eq: $userId },
-      type: { _eq: "xp" },
-      path: { _ilike: "%/piscine-js/%" }
-    }) {
-      aggregate {
-        sum {
-          amount
-        }
-      }
-    }
-  }
-`;
-
-export const GET_PROJECT_XP = gql`
-  query GetProjectXP($userId: Int!, $objectId: Int!) {
-    transaction_aggregate(where: {
-      userId: { _eq: $userId },
-      objectId: { _eq: $objectId },
-      type: { _eq: "xp" }
-    }) {
-      aggregate {
-        sum {
-          amount
-        }
-      }
-    }
-  }
-`;
-
-export const GET_PROJECTS_WITH_XP = gql`
-  query GetProjectsWithXP($userId: Int!) {
-    progress(
+    transaction_aggregate(
       where: {
-        userId: { _eq: $userId }
-        object: { type: { _eq: "project" } }
-        grade: { _is_null: false }
+        userId: { _eq: $userId },
+        path: { _like: "%piscine-js%" },
+        type: { _eq: "xp" }
       }
-      order_by: { updatedAt: desc }
     ) {
-      grade
-      updatedAt
+      aggregate {
+        sum {
+          amount
+        }
+      }
+    }
+  }
+`;
+
+// ✅ جميع المشاريع بالـ XP
+export const GET_PROJECTS_WITH_XP = gql`
+  query GetProjectXP($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId },
+        type: { _eq: "xp" },
+        object: { type: { _eq: "project" } }
+      }
+    ) {
+      amount
+      createdAt
       object {
         name
-        id
       }
     }
   }
 `;
 
+// ✅ النسبة بين المشاريع الناجحة والفاشلة
 export const GET_PROJECTS_PASS_FAIL = gql`
   query GetProjectsPassFail($userId: Int!) {
     progress(
       where: {
-        userId: { _eq: $userId }
-        object: { type: { _eq: "project" } }
+        userId: { _eq: $userId },
+        object: { type: { _eq: "project" } },
         grade: { _is_null: false }
       }
     ) {
@@ -108,13 +102,14 @@ export const GET_PROJECTS_PASS_FAIL = gql`
   }
 `;
 
+// ✅ تاريخ بداية البرنامج الحقيقي من أول transaction فيها bh-module
 export const GET_PROGRAM_START_DATE = gql`
   query GetProgramStartDate($userId: Int!) {
     transaction(
       where: {
         userId: { _eq: $userId },
         type: { _eq: "xp" },
-        path: { _ilike: "%/bh-module%" }
+        event: { path: { _like: "%/bh-module%" } }
       }
       order_by: { createdAt: asc }
       limit: 1
