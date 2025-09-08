@@ -3,8 +3,8 @@ import { gql } from '@apollo/client';
 
 /**
  * Notes:
- * - Always aggregate on the server (sum/max) then format on the UI.
- * - XP amounts are bytes; convert only when displaying.
+ * - Aggregate (sum/max) on the server; format on the UI.
+ * - XP amounts are in bytes; convert only when displaying.
  */
 
 // Authenticated user basic info
@@ -50,7 +50,7 @@ export const Q_PISCINE_GO_XP = gql`
   }
 `;
 
-// Piscine JS XP in bytes (optional display)
+// Piscine JS XP in bytes (optional)
 export const Q_PISCINE_JS_XP = gql`
   query PiscineJsXP($userId: Int!) {
     transaction_aggregate(
@@ -67,7 +67,7 @@ export const Q_PISCINE_JS_XP = gql`
   }
 `;
 
-// Projects XP list (display only — don't use for totals)
+// Projects XP list (display-only; do NOT use it to compute totals)
 export const GET_PROJECTS_WITH_XP = gql`
   query ProjectsWithXP($userId: Int!, $limit: Int = 100) {
     transaction(
@@ -87,7 +87,7 @@ export const GET_PROJECTS_WITH_XP = gql`
   }
 `;
 
-// Last activity timestamps from transactions & results (for "Last Updated")
+// Latest activity timestamps for "Last Updated"
 export const Q_LAST_DATES = gql`
   query LastDates($userId: Int!) {
     transaction_aggregate(where: { userId: { _eq: $userId } }) {
@@ -99,8 +99,7 @@ export const Q_LAST_DATES = gql`
   }
 `;
 
-// Lightweight results list for pass/fail percentage
-// (We only fetch 'grade' to stay schema-agnostic)
+// Light results list for pass/fail percentage
 export const Q_RESULTS_GRADES = gql`
   query ResultsGrades($userId: Int!, $limit: Int = 2000) {
     result(
