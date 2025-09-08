@@ -2,12 +2,11 @@
 import { gql } from '@apollo/client';
 
 /**
- * Notes:
- * - Aggregate (sum/max) on the server; format on the UI.
- * - XP amounts are in bytes; convert only when displaying.
+ * Server-side aggregates (sum/max) for accuracy.
+ * XP amounts are in BYTES; convert only in the UI.
  */
 
-// Authenticated user basic info
+// -- Basic user info
 export const GET_USER_INFO = gql`
   query GetUserDetails {
     user {
@@ -22,8 +21,8 @@ export const GET_USER_INFO = gql`
   }
 `;
 
-// Total XP in bytes
-export const Q_TOTAL_XP = gql`
+// -- Total XP (bytes)
+export const GET_TOTAL_XP_BYTES = gql`
   query TotalXP($userId: Int!) {
     transaction_aggregate(
       where: { userId: { _eq: $userId }, type: { _eq: "xp" } }
@@ -33,8 +32,8 @@ export const Q_TOTAL_XP = gql`
   }
 `;
 
-// Piscine GO XP in bytes
-export const Q_PISCINE_GO_XP = gql`
+// -- Piscine GO XP (bytes) via path ilike
+export const GET_PISCINE_GO_XP_AGG = gql`
   query PiscineGoXP($userId: Int!) {
     transaction_aggregate(
       where: {
@@ -50,8 +49,8 @@ export const Q_PISCINE_GO_XP = gql`
   }
 `;
 
-// Piscine JS XP in bytes (optional)
-export const Q_PISCINE_JS_XP = gql`
+// -- Piscine JS XP (bytes) via path ilike
+export const GET_PISCINE_JS_XP_AGG = gql`
   query PiscineJsXP($userId: Int!) {
     transaction_aggregate(
       where: {
@@ -67,9 +66,43 @@ export const Q_PISCINE_JS_XP = gql`
   }
 `;
 
-// Projects XP list (display-only; do NOT use it to compute totals)
+// -- Project XP (bytes) for the user (object.type="project")
+export const GET_PROJECTS_XP_AGG = gql`
+  query ProjectsXPAgg($userId: Int!) {
+    transaction_aggregate(
+      where: {
+        userId: { _eq: $userId }
+        type: { _eq: "xp" }
+        object: { type: { _eq: "project" } }
+      }
+    ) {
+      aggregate { sum { amount } }
+    }
+  }
+`;
+
+// -- Finished projects with XP (list for display)
 export const GET_PROJECTS_WITH_XP = gql`
-  query ProjectsWithXP($userId: Int!, $limit: Int = 100) {
+  query GetProjectsAndXP($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId }
+        type: { _eq: "xp" }
+        object: { type: { _eq: "project" } }
+      }
+      order_by: { createdAt: asc }
+    ) {
+      id
+      amount
+      createdAt
+      object { name }
+    }
+  }
+`;
+
+// -- Latest 12 projects with XP (for charts)
+export const GET_LATEST_PROJECTS_WITH_XP = gql`
+  query GetLatestProjectsAndXP($userId: Int!) {
     transaction(
       where: {
         userId: { _eq: $userId }
@@ -77,17 +110,31 @@ export const GET_PROJECTS_WITH_XP = gql`
         object: { type: { _eq: "project" } }
       }
       order_by: { createdAt: desc }
-      limit: $limit
+      limit: 12
     ) {
+      id
       amount
       createdAt
-      path
       object { name }
     }
   }
 `;
 
-// Latest activity timestamps for "Last Updated"
+// -- Pass/Fail (grade) for projects
+export const GET_PROJECTS_PASS_FAIL = gql`
+  query GetProjectsPassFail($userId: Int!) {
+    progress(
+      where: {
+        userId: { _eq: $userId }
+        object: { type: { _eq: "project" } }
+      }
+    ) {
+      grade
+    }
+  }
+`;
+
+// -- Latest timestamps from transactions & results (for "Last Updated")
 export const Q_LAST_DATES = gql`
   query LastDates($userId: Int!) {
     transaction_aggregate(where: { userId: { _eq: $userId } }) {
@@ -95,19 +142,6 @@ export const Q_LAST_DATES = gql`
     }
     result_aggregate(where: { userId: { _eq: $userId } }) {
       aggregate { max { createdAt updatedAt } }
-    }
-  }
-`;
-
-// Light results list for pass/fail percentage
-export const Q_RESULTS_GRADES = gql`
-  query ResultsGrades($userId: Int!, $limit: Int = 2000) {
-    result(
-      where: { userId: { _eq: $userId } }
-      order_by: { createdAt: desc }
-      limit: $limit
-    ) {
-      grade
     }
   }
 `;
