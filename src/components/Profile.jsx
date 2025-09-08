@@ -45,7 +45,6 @@ function Profile() {
   const projectXPTotal = (projectXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
   const projects = projectsData?.transaction || [];
 
-  // تعديل فلترة النجاح والفشل
   const passCount = passFailData.progress.filter((item) => item.grade === 1).length;
   const failCount = passFailData.progress.filter((item) => item.grade === 0).length;
 
@@ -125,4 +124,21 @@ function Profile() {
                   </div>
                   <div>
                     <p className="font-semibold text-purple-600">Piscine JS XP</p>
-                    <p>{p
+                    <p>{piscineJsXPTotal.toFixed(2)} KB</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-purple-600">Project XP</p>
+                    <p>{projectXPTotal.toFixed(2)} KB</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Finished Projects Section */}
+          <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+            <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
+              <h3 className="text-lg leading-6 font-medium">Finished Projects</h3>
+            </div>
+            <div className="border-t border-gray-200">
+              <div
