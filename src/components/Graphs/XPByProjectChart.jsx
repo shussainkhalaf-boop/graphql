@@ -16,7 +16,7 @@ function formatXP(bytes) {
 }
 
 function XPByProjectChart({ projects }) {
-  const chartData = projects.map((project) => {
+  const chartData = (projects || []).map((project) => {
     const { value, unit } = formatXP(project.amount);
     return {
       name: project.object?.name || 'Unknown',
@@ -25,6 +25,7 @@ function XPByProjectChart({ projects }) {
     };
   });
 
+  // 
   const unit = chartData[0]?.unit || 'KB';
 
   return (
