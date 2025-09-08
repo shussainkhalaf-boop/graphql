@@ -26,7 +26,7 @@ function formatMBorGB(bytes, digits = 2) {
   if (mb >= 1000) {
     const gb = b / (1024 * 1024 * 1024);
     return { value: gb.toFixed(digits), unit: 'GB' };
-    }
+  }
   return { value: mb.toFixed(digits), unit: 'MB' };
 }
 
@@ -72,7 +72,7 @@ function Stat({ label, value }) {
 export default function Profile() {
   // 1) User (for id + created/updated)
   const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
-  const user = userData?.user?.[0] || null;
+  const user = Array.isArray(userData?.user) ? userData.user[0] : null;
   const userId = user?.id ?? null;
 
   // 2) Aggregates
