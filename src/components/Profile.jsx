@@ -3,84 +3,177 @@ import React, { useEffect, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import {
   GET_USER_INFO,
+  GEt_Total_XPInKB,
   GET_PROJECTS_WITH_XP,
   GET_PROJECTS_PASS_FAIL,
   GET_LATEST_PROJECTS_WITH_XP,
-  GEt_Total_XPInKB,
   GET_PISCINE_GO_XP,
   GET_PISCINE_JS_XP,
   GET_PROJECT_XP,
-  GET_PROGRAM_START_DATE
+  GET_FIRST_PROJECT_DATE
 } from '../graphql/queries';
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
 
 function formatDate(dateStr) {
   const d = new Date(dateStr);
-  return d.toLocaleDateString('en-GB'); // DD/MM/YYYY
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 function Profile() {
+  const { data: userData } = useQuery(GET_USER_INFO);
   const [userId, setUserId] = useState(null);
 
-  const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
   useEffect(() => {
-    if (userData?.user?.length) {
+    if (userData?.user?.length > 0) {
       setUserId(userData.user[0].id);
     }
   }, [userData]);
 
-  const { data: xpData } = useQuery(GEt_Total_XPInKB, { variables: { userId } });
-  const { data: piscineGoXP } = useQuery(GET_PISCINE_GO_XP, { variables: { userId } });
-  const { data: piscineJsXP } = useQuery(GET_PISCINE_JS_XP, { variables: { userId } });
-  const { data: projectXP } = useQuery(GET_PROJECT_XP, { variables: { userId } });
+  const { data: xpdata } = useQuery(GEt_Total_XPInKB, { variables: { userId } });
+  const { data: piscineGoXPData } = useQuery(GET_PISCINE_GO_XP, { variables: { userId } });
+  const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, { variables: { userId } });
+  const { data: projectXPData } = useQuery(GET_PROJECT_XP, { variables: { userId } });
   const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId } });
   const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId } });
   const { data: latestProjectsData } = useQuery(GET_LATEST_PROJECTS_WITH_XP, { variables: { userId } });
-  const { data: startDateData } = useQuery(GET_PROGRAM_START_DATE, { variables: { userId } });
+  const { data: firstProjectDateData } = useQuery(GET_FIRST_PROJECT_DATE, { variables: { userId } });
 
-  if (userLoading || !userId) return <div>Loading...</div>;
-  if (userError) return <div>Error loading data</div>;
-
-  const currentUser = userData.user[0];
-  const totalXP = (xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
-  const piscineGoXPTotal = piscineGoXP?.transaction.reduce((acc, tx) => acc + tx.amount, 0) / 1000 || 0;
-  const piscineJsXPTotal = piscineJsXP?.transaction_aggregate?.aggregate?.sum?.amount / 1000 || 0;
-  const projectXPTotal = projectXP?.transaction_aggregate?.aggregate?.sum?.amount / 1000 || 0;
-  const passCount = passFailData?.progress.filter((p) => p.grade >= 1).length || 0;
-  const failCount = passFailData?.progress.filter((p) => p.grade < 1).length || 0;
+  const currentUser = userData?.user?.[0] || {};
+  const piscineGoXPTotal = piscineGoXPData?.transaction.reduce((sum, tx) => sum + tx.amount, 0) / 1000 || 0;
+  const piscineJsXPTotal = (piscineJsXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
+  const projectXPTotal = (projectXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
+  const totalXP = xpdata?.transaction_aggregate?.aggregate?.sum?.amount || 0;
+  const totalXPInKB = (totalXP / 1000).toFixed(2);
+  const projects = projectsData?.transaction || [];
   const latestProjects = latestProjectsData?.transaction || [];
-  const startedDate = startDateData?.transaction?.[0]?.createdAt || currentUser.updatedAt;
+
+  const firstProjectDate = firstProjectDateData?.transaction?.[0]?.createdAt;
+  const startedProgram = firstProjectDate ? formatDate(firstProjectDate) : 'N/A';
+  const accountCreated = currentUser?.createdAt ? formatDate(currentUser.createdAt) : 'N/A';
+
+  const passCount = passFailData?.progress?.filter((item) => item.grade >= 1).length || 0;
+  const failCount = passFailData?.progress?.filter((item) => item.grade !== null && item.grade < 1).length || 0;
+
+  const handleLogout = () => {
+    if (window.confirm("Are you sure you want to log out?")) {
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    }
+  };
 
   return (
-    <div className="p-4">
-      <h1 className="text-3xl font-bold mb-4">Student Profile</h1>
+    <div className="profile-bg">
+      <div className="container mx-auto p-4 bg-gray-100 bg-opacity-20">
+        <header className="flex justify-between items-center mb-6 bg-purple-700 text-white p-4 rounded-lg shadow-lg">
+          <h1 className="text-3xl font-bold">School Profile</h1>
+          <button
+            onClick={handleLogout}
+            className="bg-red-500 text-white px-4 py-2 rounded shadow hover:bg-red-600 transition"
+          >
+            Logout
+          </button>
+        </header>
 
-      <div className="bg-white p-4 rounded shadow mb-6">
-        <h2 className="text-xl font-semibold mb-2">Basic Info</h2>
-        <p><strong>ID:</strong> {currentUser.id}</p>
-        <p><strong>Username:</strong> {currentUser.login}</p>
-        <p><strong>Email:</strong> {currentUser.email}</p>
-        <p><strong>Started Program:</strong> {formatDate(startedDate)}</p>
-        <p><strong>Account Created:</strong> {formatDate(currentUser.createdAt)}</p>
-      </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 space-y-6">
+            <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+              <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
+                <h3 className="text-lg leading-6 font-medium">Basic Information</h3>
+              </div>
+              <div className="border-t border-gray-200">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 py-5">
+                  <div className="flex items-center space-x-4 col-span-2 sm:col-span-1">
+                    <div className="h-20 w-20 rounded-full bg-purple-500 flex items-center justify-center text-2xl font-bold text-white">
+                      {currentUser.firstName && currentUser.lastName
+                        ? `${currentUser.firstName[0]}${currentUser.lastName[0]}`
+                        : currentUser.login?.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-900">{currentUser.firstName} {currentUser.lastName}</h2>
+                      <p className="text-purple-600">@{currentUser.login}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2 col-span-2 sm:col-span-1">
+                    <p><span className="font-semibold text-purple-600">ID:</span> {currentUser.id}</p>
+                    <p><span className="font-semibold text-purple-600">Email:</span> {currentUser.email}</p>
+                    <p><span className="font-semibold text-purple-600">Started Program:</span> {startedProgram}</p>
+                    <p><span className="font-semibold text-purple-600">Account Created:</span> {accountCreated}</p>
+                  </div>
+                </dl>
+              </div>
+            </div>
 
-      <div className="bg-white p-4 rounded shadow mb-6">
-        <h2 className="text-xl font-semibold mb-2">XP Summary</h2>
-        <p><strong>Total XP:</strong> {totalXP >= 1000 ? (totalXP / 1000).toFixed(2) + " MB" : totalXP.toFixed(2) + " KB"}</p>
-        <p><strong>Piscine Go XP:</strong> {piscineGoXPTotal.toFixed(2)} KB</p>
-        <p><strong>Piscine JS XP:</strong> {piscineJsXPTotal.toFixed(2)} KB</p>
-        <p><strong>Project XP:</strong> {projectXPTotal.toFixed(2)} KB</p>
-      </div>
+            <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+              <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
+                <h3 className="text-lg leading-6 font-medium">XP Summary</h3>
+              </div>
+              <div className="border-t border-gray-200 px-4 py-5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div className="col-span-2 sm:col-span-3">
+                    <p className="text-lg font-semibold text-purple-700">Total XP: {totalXPInKB} KB</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-purple-600">Piscine Go XP</p>
+                    <p>{piscineGoXPTotal.toFixed(2)} KB</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-purple-600">Piscine JS XP</p>
+                    <p>{piscineJsXPTotal.toFixed(2)} KB</p>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-purple-600">Project XP</p>
+                    <p>{projectXPTotal.toFixed(2)} KB</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
-      <div className="bg-white p-4 rounded shadow mb-6">
-        <h2 className="text-xl font-semibold mb-2">Pass/Fail</h2>
-        <PassFailChart passCount={passCount} failCount={failCount} />
-      </div>
+          <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+            <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
+              <h3 className="text-lg leading-6 font-medium">Finished Projects</h3>
+            </div>
+            <div className="border-t border-gray-200">
+              <div className="finished-projects-container px-4 py-5 h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500 scrollbar-track-gray-200">
+                {projects.map((project, index) => (
+                  <div key={project.id} className="mb-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{project.object?.name}</h3>
+                        <p className="text-sm text-gray-500">
+                          Completed: {formatDate(project.createdAt)}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                        {(project.amount / 1000).toFixed(2)} KB
+                      </span>
+                    </div>
+                    {index < projects.length - 1 && <hr className="my-2 border-gray-200" />}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
 
-      <div className="bg-white p-4 rounded shadow mb-6">
-        <h2 className="text-xl font-semibold mb-2">Latest Projects</h2>
-        <XPByProjectChart projects={latestProjects} />
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full">
+            <h2 className="text-xl font-bold mb-4 text-purple-700">XP by Latest 12 Projects</h2>
+            <div className="w-full h-[500px]">
+              <XPByProjectChart projects={latestProjects} />
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full">
+            <h2 className="text-xl font-bold mb-4 text-purple-700">Projects PASS and FAIL Ratio</h2>
+            <div className="flex justify-center items-center">
+              <PassFailChart passCount={passCount} failCount={failCount} />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
