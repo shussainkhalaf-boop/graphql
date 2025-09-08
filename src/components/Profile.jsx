@@ -18,7 +18,7 @@ function Profile() {
   const [userId, setUserId] = useState(null);
 
   useEffect(() => {
-    if (userData && userData.user && userData.user.length > 0) {
+    if (userData?.user?.length > 0) {
       setUserId(userData.user[0].id);
     }
   }, [userData]);
@@ -43,14 +43,12 @@ function Profile() {
   const piscineGoXPTotal = piscineGoXPData?.transaction.reduce((sum, tx) => sum + tx.amount, 0) / 1000 || 0;
   const piscineJsXPTotal = (piscineJsXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
   const projectXPTotal = (projectXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
-  const projects = projectsData?.transaction || [];
-  const passCount = passFailData.progress.filter((item) => item.grade !== null && item.grade >= 1).length;
-  const failCount = passFailData.progress.filter((item) => item.grade !== null && item.grade < 1).length;
-
   const totalXP = xpdata?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const totalXPInKB = (totalXP / 1000).toFixed(2);
-
+  const projects = projectsData?.transaction || [];
   const latestProjects = latestProjectsData?.transaction || [];
+  const passCount = passFailData.progress.filter((item) => item.grade !== null && item.grade >= 1).length;
+  const failCount = passFailData.progress.filter((item) => item.grade !== null && item.grade < 1).length;
 
   const handleLogout = () => {
     if (window.confirm("Are you sure you want to log out?")) {
@@ -74,7 +72,7 @@ function Profile() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="md:col-span-2 space-y-6">
-            {/* Basic Info Section */}
+            {/* Basic Info */}
             <div className="bg-white shadow-lg rounded-lg overflow-hidden">
               <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
                 <h3 className="text-lg leading-6 font-medium">Basic Information</h3>
@@ -102,7 +100,7 @@ function Profile() {
               </div>
             </div>
 
-            {/* XP Summary Section */}
+            {/* XP Summary */}
             <div className="bg-white shadow-lg rounded-lg overflow-hidden">
               <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
                 <h3 className="text-lg leading-6 font-medium">XP Summary</h3>
@@ -129,13 +127,13 @@ function Profile() {
             </div>
           </div>
 
-          {/* Finished Projects Section */}
+          {/* Finished Projects */}
           <div className="bg-white shadow-lg rounded-lg overflow-hidden">
             <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
               <h3 className="text-lg leading-6 font-medium">Finished Projects</h3>
             </div>
             <div className="border-t border-gray-200">
-              <div className="finished-projects-container px-4 py-5 h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500 scrollbar-track-gray-200">
+              <div className="px-4 py-5 h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500 scrollbar-track-gray-200">
                 {projects.map((project, index) => (
                   <div key={project.id} className="mb-4">
                     <div className="flex justify-between items-start">
@@ -157,7 +155,7 @@ function Profile() {
           </div>
         </div>
 
-        {/* Charts Section */}
+        {/* Charts */}
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full">
             <h2 className="text-xl font-bold mb-4 text-purple-700">XP by Latest 12 Projects</h2>
