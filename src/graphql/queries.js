@@ -13,19 +13,29 @@ export const Q_DASH = gql`
       id
       login
       email
+      firstName
+      lastName
       createdAt
     }
 
     up: transaction_aggregate(
       where: { userId: { _eq: $userId }, type: { _eq: "up" } }
     ) {
-      aggregate { sum { amount } }
+      aggregate {
+        sum {
+          amount
+        }
+      }
     }
 
     down: transaction_aggregate(
       where: { userId: { _eq: $userId }, type: { _eq: "down" } }
     ) {
-      aggregate { sum { amount } }
+      aggregate {
+        sum {
+          amount
+        }
+      }
     }
 
     # Started Program = earliest XP inside bh-module
@@ -36,17 +46,22 @@ export const Q_DASH = gql`
         path: { _ilike: "%bh-module%" }
       }
     ) {
-      aggregate { min { createdAt } }
+      aggregate {
+        min {
+          createdAt
+        }
+      }
     }
 
     # Fallback if user has no bh-module xp yet: earliest xp overall
     startAny: transaction_aggregate(
-      where: {
-        userId: { _eq: $userId }
-        type: { _eq: "xp" }
-      }
+      where: { userId: { _eq: $userId }, type: { _eq: "xp" } }
     ) {
-      aggregate { min { createdAt } }
+      aggregate {
+        min {
+          createdAt
+        }
+      }
     }
 
     # Latest attempt per project (Hasura: distinct_on + order_by)
@@ -61,7 +76,9 @@ export const Q_DASH = gql`
       objectId
       grade          # 1 = PASS, 0 = FAIL
       updatedAt      # treat as "finished at" when grade = 1
-      object { name }
+      object {
+        name
+      }
     }
   }
 `;
