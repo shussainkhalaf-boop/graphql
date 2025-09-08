@@ -25,9 +25,7 @@ function Profile() {
   const [userId, setUserId] = useState(null);
 
   useEffect(() => {
-    if (userData?.user?.length > 0) {
-      setUserId(userData.user[0].id);
-    }
+    if (userData?.user?.length > 0) setUserId(userData.user[0].id);
   }, [userData]);
 
   const common = { skip: !userId, variables: { userId } };
@@ -43,19 +41,19 @@ function Profile() {
   const piscineGoXP = piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const moduleOnlyXP = totalXP - piscineGoXP;
 
-  // Projects: newest → oldest
+  // Newest → Oldest
   const projects = useMemo(() => {
     return [...(projectsData?.transaction || [])].sort(
       (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
     );
   }, [projectsData]);
 
-  // Pass/Fail based on the latest progress per project
+  // Latest progress per project → pass/fail
   const { passCount, failCount } = useMemo(() => {
     const rows = passFailData?.progress || [];
-    // sort desc to pick latest first
+    // Ensure we have the needed fields
+    // Sort by createdAt desc so first seen per objectId is the latest
     const sorted = [...rows].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    // dedupe by project (objectId)
     const latestByProject = new Map();
     for (const r of sorted) {
       if (!latestByProject.has(r.objectId)) {
@@ -68,11 +66,11 @@ function Profile() {
     return { passCount: pass, failCount: fail };
   }, [passFailData]);
 
-  // Dates
+  // Correct dates:
   const user = userData?.user?.[0];
   const accountCreated = user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—';
 
-  // Program start: earliest progress date; fallback to account created
+  // Started Program → earliest progress date; fallback to account created
   const programStartISO = programStartData?.progress?.[0]?.createdAt || user?.createdAt || null;
   const programStarted = programStartISO ? new Date(programStartISO).toLocaleDateString() : '—';
 
@@ -89,7 +87,7 @@ function Profile() {
           <p><strong>Email:</strong> {user.email}</p>
           <p><strong>ID:</strong> {user.id}</p>
 
-          {/* Correct dates */}
+          {/* Correct dates (no hardcoded values) */}
           <p><strong>Account Created:</strong> {accountCreated}</p>
           <p><strong>Started Program:</strong> {programStarted}</p>
 
