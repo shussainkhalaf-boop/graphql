@@ -11,23 +11,21 @@ import {
   GET_PISCINE_JS_XP_AGG,
   GET_PROJECTS_XP_AGG,
   Q_LAST_DATES,
+  // Q_FIRST_DATES,  // ⬅︎ no longer needed
 } from '../graphql/queries';
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
 
-// ---- Helpers ----
 const TZ = 'Asia/Bahrain';
 
-// Adaptive formatter (bytes -> KB / MB / GB)
+// bytes -> KB/MB/GB (thresholds at 1000)
 function formatAdaptive(bytes, digits = 2) {
   const b = Number(bytes || 0);
   const kb = b / 1024;
   if (!Number.isFinite(kb)) return { value: '0', unit: 'KB' };
   if (kb < 1000) return { value: Math.round(kb).toString(), unit: 'KB' };
-
   const mb = kb / 1024;
   if (mb < 1000) return { value: mb.toFixed(digits), unit: 'MB' };
-
   const gb = mb / 1024;
   return { value: gb.toFixed(digits), unit: 'GB' };
 }
@@ -45,7 +43,6 @@ function formatDate(d, withTime = false) {
   }
 }
 
-// Robust pass/fail inference from various grade types
 function isPassGrade(grade) {
   const g = grade;
   if (typeof g === 'boolean') return g;
@@ -61,17 +58,11 @@ export default function Profile() {
   // 1) User -> userId
   const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
   const [userId, setUserId] = useState(null);
+  useEffect(() => setUserId(userData?.user?.[0]?.id ?? null), [userData]);
 
-  useEffect(() => {
-    const uid = userData?.user?.[0]?.id ?? null;
-    setUserId(uid);
-  }, [userData]);
-
-  // 2) Queries that depend on userId (skip until available)
-  const { data: xpAgg, loading: xpLoading, error: xpError } = useQuery(GET_TOTAL_XP_BYTES, {
-    variables: { userId },
-    skip: !userId,
-  });
+  // 2) Queries (skip until userId is ready)
+  const { data: xpAgg, loading: xpLoading, error: xpError } =
+    useQuery(GET_TOTAL_XP_BYTES, { variables: { userId }, skip: !userId });
 
   const { data: piscineGoAgg, loading: piscineGoLoading, error: piscineGoError } =
     useQuery(GET_PISCINE_GO_XP_AGG, { variables: { userId }, skip: !userId });
@@ -94,7 +85,7 @@ export default function Profile() {
   const { data: lastAgg, loading: lastLoading, error: lastError } =
     useQuery(Q_LAST_DATES, { variables: { userId }, skip: !userId });
 
-  // Loading/Error states
+  // Loading/Error UI
   if (
     userLoading || xpLoading || projectsLoading || passFailLoading ||
     latestProjectsLoading || piscineGoLoading || piscineJsLoading ||
@@ -102,7 +93,6 @@ export default function Profile() {
   ) {
     return <div className="text-center text-purple-500 font-bold">Loading...</div>;
   }
-
   if (
     userError || xpError || projectsError || passFailError ||
     latestProjectsError || piscineGoError || piscineJsError ||
@@ -113,12 +103,29 @@ export default function Profile() {
 
   // Values
   const currentUser = userData?.user?.[0] ?? {};
+
+  // ✅ Program Start must equal account createdAt (strict)
+  const programStart = currentUser?.createdAt ? new Date(currentUser.createdAt) : null;
+
+  // Last Updated = latest across user + tx + result
+  const maxTx = lastAgg?.transaction_aggregate?.aggregate?.max;
+  const maxRes = lastAgg?.result_aggregate?.aggregate?.max;
+  const latestCandidates = [
+    currentUser?.updatedAt,
+    maxTx?.updatedAt, maxTx?.createdAt,
+    maxRes?.updatedAt, maxRes?.createdAt,
+  ].filter(Boolean);
+  const lastUpdated = latestCandidates.length
+    ? new Date(Math.max(...latestCandidates.map((d) => Date.parse(d))))
+    : (currentUser?.updatedAt ? new Date(currentUser.updatedAt) : null);
+
+  // XP totals (bytes)
   const totalBytes = xpAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
   const piscineGoBytes = piscineGoAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
   const piscineJsBytes = piscineJsAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
   const projectBytes = projectAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
 
-  // Adaptive units for top KPIs
+  // Adaptive units
   const totalDisp = formatAdaptive(totalBytes);
   const piscineGoDisp = formatAdaptive(piscineGoBytes);
   const piscineJsDisp = formatAdaptive(piscineJsBytes);
@@ -129,24 +136,8 @@ export default function Profile() {
   // Pass/Fail
   const grades = passFailData?.progress ?? [];
   const passCount = grades.filter((g) => isPassGrade(g?.grade)).length;
-  const failCount = grades.length - passCount;
+  const failCount = Math.max(0, grades.length - passCount);
 
-  // Program Start (createdAt) & Last Updated (latest across user/tx/result)
-  const programStart = currentUser?.createdAt ? new Date(currentUser.createdAt) : null;
-
-  const lastCandidates = [
-    currentUser?.updatedAt,
-    lastAgg?.transaction_aggregate?.aggregate?.max?.updatedAt,
-    lastAgg?.transaction_aggregate?.aggregate?.max?.createdAt,
-    lastAgg?.result_aggregate?.aggregate?.max?.updatedAt,
-    lastAgg?.result_aggregate?.aggregate?.max?.createdAt,
-  ].filter(Boolean);
-
-  const lastUpdated = lastCandidates.length
-    ? new Date(Math.max(...lastCandidates.map((d) => Date.parse(d))))
-    : (currentUser?.updatedAt ? new Date(currentUser.updatedAt) : null);
-
-  // Latest projects list for chart (pass raw bytes; chart can convert, or adapt here)
   const latestProjects = latestProjectsData?.transaction ?? [];
 
   const initials = (currentUser.firstName && currentUser.lastName)
@@ -194,6 +185,8 @@ export default function Profile() {
                   <div className="space-y-2 col-span-2 sm:col-span-1">
                     <p><span className="font-semibold text-purple-600">ID:</span> {currentUser.id ?? '—'}</p>
                     <p><span className="font-semibold text-purple-600">Email:</span> {currentUser.email ?? '—'}</p>
+                    {/* show both explicitly so it's clear */}
+                    <p><span className="font-semibold text-purple-600">Account Created:</span> {formatDate(programStart)}</p>
                     <p><span className="font-semibold text-purple-600">Program Start:</span> {formatDate(programStart)}</p>
                     <p><span className="font-semibold text-purple-600">Last Updated:</span> {formatDate(lastUpdated, true)}</p>
                   </div>
