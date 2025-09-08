@@ -1,8 +1,5 @@
-// Apollo GraphQL queries (Hasura-style)
-
 import { gql } from "@apollo/client";
 
-// Basic user info (for Account Created)
 export const Q_ME = gql`
   query Me {
     user {
@@ -14,7 +11,7 @@ export const Q_ME = gql`
   }
 `;
 
-// Earliest bh-module XP for Program Start (no aggregate quirks)
+// Earliest bh-module XP = Program Start
 export const Q_PROGRAM_START = gql`
   query ProgramStart($userId: Int!) {
     transaction(
@@ -33,7 +30,6 @@ export const Q_PROGRAM_START = gql`
   }
 `;
 
-// All *project* progresses, latest attempt first per objectId (we dedupe in JS)
 export const Q_PROJECT_PROGRESS = gql`
   query ProjectProgress($userId: Int!) {
     progress(
@@ -57,7 +53,6 @@ export const Q_PROJECT_PROGRESS = gql`
   }
 `;
 
-// Total XP
 export const Q_TOTAL_XP = gql`
   query TotalXP($userId: Int!) {
     transaction_aggregate(
@@ -72,7 +67,6 @@ export const Q_TOTAL_XP = gql`
   }
 `;
 
-// Optional: Piscine split (if you show them)
 export const Q_PISCINE_GO_XP = gql`
   query PiscineGoXP($userId: Int!) {
     transaction_aggregate(
