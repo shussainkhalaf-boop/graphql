@@ -1,17 +1,35 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ResponsiveContainer } from 'recharts';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
+
+function formatXP(bytes) {
+  const kb = bytes / 1024;
+  if (kb >= 1000) return { value: (kb / 1024).toFixed(2), unit: 'MB' };
+  return { value: kb.toFixed(2), unit: 'KB' };
+}
 
 function XPByProjectChart({ projects }) {
-  const chartData = projects.map((project) => ({
-    name: project.object?.name || 'Unknown Project',
-    xp: (project.amount / 1024).toFixed(2),
-  }));
+  const chartData = projects.map((project) => {
+    const { value, unit } = formatXP(project.amount);
+    return {
+      name: project.object?.name || 'Unknown',
+      xp: parseFloat(value),
+      unit
+    };
+  });
+
+  const unit = chartData[0]?.unit || 'KB';
 
   return (
     <ResponsiveContainer width="100%" height={500}>
-      <BarChart
-        data={chartData}
-        margin={{ top: 20, right: 30, left: 50, bottom: 92 }}
-      >
+      <BarChart data={chartData} margin={{ top: 20, right: 30, left: 50, bottom: 92 }}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis
           dataKey="name"
@@ -21,13 +39,11 @@ function XPByProjectChart({ projects }) {
           textAnchor="end"
         />
         <YAxis
-          domain={[0, 200]}
           label={{
-            value: 'XP in KB',
+            value: `XP in ${unit}`,
             angle: -90,
             position: 'insideLeft',
-            textAnchor: 'middle',
-            style: { fontSize: 20 },
+            style: { fontSize: 20 }
           }}
         />
         <Tooltip />
@@ -42,7 +58,6 @@ function XPByProjectChart({ projects }) {
       </BarChart>
     </ResponsiveContainer>
   );
-};
+}
 
 export default XPByProjectChart;
-
