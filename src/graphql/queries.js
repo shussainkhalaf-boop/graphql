@@ -75,7 +75,8 @@ export const Q_DASH = gql`
     ) {
       objectId
       grade          # 1 = PASS, 0 = FAIL
-      updatedAt      # treat as "finished at" when grade = 1
+      updatedAt      # تاريخ الإنهاء الفعلي
+      createdAt      # تاريخ الإنشاء (احتياطي)
       object {
         name
       }
