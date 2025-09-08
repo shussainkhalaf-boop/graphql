@@ -6,7 +6,7 @@ import { gql } from '@apollo/client';
  * XP amounts are in BYTES; convert only in the UI.
  */
 
-// -- Basic user info
+// -- Basic user info (assumes RLS returns exactly one row for current user)
 export const GET_USER_INFO = gql`
   query GetUserDetails {
     user {
@@ -32,14 +32,14 @@ export const GET_TOTAL_XP_BYTES = gql`
   }
 `;
 
-// -- Piscine GO XP (bytes) via path ilike
+// -- Piscine GO XP (bytes)
 export const GET_PISCINE_GO_XP_AGG = gql`
   query PiscineGoXP($userId: Int!) {
     transaction_aggregate(
       where: {
         _and: [
-          { userId: { _eq: $userId } }
-          { type: { _eq: "xp" } }
+          { userId: { _eq: $userId } },
+          { type: { _eq: "xp" } },
           { path: { _ilike: "%/piscine-go/%" } }
         ]
       }
@@ -49,14 +49,14 @@ export const GET_PISCINE_GO_XP_AGG = gql`
   }
 `;
 
-// -- Piscine JS XP (bytes) via path ilike
+// -- Piscine JS XP (bytes)
 export const GET_PISCINE_JS_XP_AGG = gql`
   query PiscineJsXP($userId: Int!) {
     transaction_aggregate(
       where: {
         _and: [
-          { userId: { _eq: $userId } }
-          { type: { _eq: "xp" } }
+          { userId: { _eq: $userId } },
+          { type: { _eq: "xp" } },
           { path: { _ilike: "%/piscine-js/%" } }
         ]
       }
@@ -134,13 +134,10 @@ export const GET_PROJECTS_PASS_FAIL = gql`
   }
 `;
 
-// -- Latest timestamps from transactions & results (for "Last Updated")
+// -- Latest timestamps for "Last Updated" (safe: only transactions)
 export const Q_LAST_DATES = gql`
   query LastDates($userId: Int!) {
     transaction_aggregate(where: { userId: { _eq: $userId } }) {
-      aggregate { max { createdAt updatedAt } }
-    }
-    result_aggregate(where: { userId: { _eq: $userId } }) {
       aggregate { max { createdAt updatedAt } }
     }
   }
