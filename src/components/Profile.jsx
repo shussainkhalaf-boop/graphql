@@ -20,14 +20,13 @@ function formatXP(bytes) {
   return bytes + ' B';
 }
 
-// ⬇️ صيغة ثابتة DD/MM/YYYY بغض النظر عن لغة المتصفح
-const fmtDMY = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit', month: '2-digit', year: 'numeric'
+// Always format as DD/MM/YYYY
+const __fmtDMY = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric'
 });
-function formatDateDMY(dateString) {
-  if (!dateString) return 'N/A';
-  return fmtDMY.format(new Date(dateString));
-}
+const toDMY = (s) => (s ? __fmtDMY.format(new Date(s)) : 'N/A');
 
 export default function Profile() {
   const { data: userData } = useQuery(GET_USER_INFO);
@@ -37,23 +36,25 @@ export default function Profile() {
     if (userData?.user?.length > 0) setUserId(userData.user[0].id);
   }, [userData]);
 
-  const { data: xpData }            = useQuery(GEt_Total_XPInKB,     { variables: { userId }, skip: !userId });
-  const { data: piscineGoXPData }   = useQuery(GET_PISCINE_GO_XP,    { variables: { userId }, skip: !userId });
-  const { data: projectsData }      = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
-  const { data: passFailData }      = useQuery(GET_PROJECTS_PASS_FAIL,{ variables: { userId }, skip: !userId });
-  const { data: programStartData }  = useQuery(GET_PROGRAM_START_DATE,{ variables: { userId }, skip: !userId });
+  const { data: xpData } = useQuery(GEt_Total_XPInKB, { variables: { userId }, skip: !userId });
+  const { data: piscineGoXPData } = useQuery(GET_PISCINE_GO_XP, { variables: { userId }, skip: !userId });
+  const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, { variables: { userId }, skip: !userId });
+  const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
+  const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
+  const { data: programStartData } = useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId });
 
-  const totalXP     = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
+  const totalXP = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const piscineGoXP = piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  const moduleOnlyXP = totalXP - piscineGoXP; // نستثني piscine-go فقط
+  // Exclude piscine-go only
+  const moduleOnlyXP = totalXP - piscineGoXP;
 
   const accountCreatedDate = userData?.user?.[0]?.createdAt || null;
-  const programStartDate   = programStartData?.transaction?.[0]?.createdAt || null;
+  const programStartDate = programStartData?.transaction?.[0]?.createdAt || null;
 
-  // الأقدم → الأحدث (عشان قائمتك تبدأ بـ go-reloaded ثم ascii-art ...)
-  const projects = [...(projectsData?.transaction || [])].sort(
-    (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
-  );
+  // Oldest → Newest
+  const projects = (projectsData?.transaction || [])
+    .slice()
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
   return (
     <div className="p-4">
@@ -64,13 +65,13 @@ export default function Profile() {
           <p><strong>Login:</strong> {userData.user[0].login}</p>
           <p><strong>Email:</strong> {userData.user[0].email}</p>
           <p><strong>ID:</strong> {userData.user[0].id}</p>
-          <p><strong>Account Created:</strong> {formatDateDMY(accountCreatedDate)}</p>
-          <p><strong>Started Program:</strong> {formatDateDMY(programStartDate)}</p>
+          <p><strong>Account Created:</strong> {toDMY(accountCreatedDate)}</p>
+          <p><strong>Started Program:</strong> {toDMY(programStartDate)}</p>
           <p><strong>Total XP (excluding piscine-go):</strong> {formatXP(moduleOnlyXP)}</p>
         </div>
       )}
 
-      {/* -------- Finished Projects (oldest -> newest) -------- */}
+      {/* -------- Finished Projects -------- */}
       <h2 className="text-xl font-semibold mb-2">Finished Projects</h2>
       {projects.length > 0 ? (
         <ul className="space-y-4 mb-6">
@@ -78,7 +79,7 @@ export default function Profile() {
             <li key={i} className="p-4 rounded-lg border border-gray-200 bg-gray-50">
               <div className="font-semibold text-lg">{p.object?.name}</div>
               <div className="text-sm text-gray-700">
-                Completed: {formatDateDMY(p.createdAt)}
+                Completed: {toDMY(p.createdAt)}
               </div>
               <div className="text-sm text-gray-500">
                 {formatXP(p.amount)}
@@ -90,6 +91,7 @@ export default function Profile() {
         <p>No project XP data found.</p>
       )}
 
+      {/* -------- Charts -------- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Pass/Fail Ratio</h2>
