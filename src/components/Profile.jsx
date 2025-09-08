@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import {
   GET_USER_INFO,
@@ -12,97 +12,82 @@ import {
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
 
+// -------- Helpers --------
 function formatXP(bytes) {
-  if (!bytes) return '0 B';
   if (bytes >= 1_000_000_000) return (bytes / 1_000_000_000).toFixed(2) + ' GB';
   if (bytes >= 1_000_000) return (bytes / 1_000_000).toFixed(2) + ' MB';
   if (bytes >= 1_000) return (bytes / 1_000).toFixed(2) + ' KB';
   return bytes + ' B';
 }
 
-function Profile() {
-  const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
+function formatDateDMY(dateString) {
+  if (!dateString) return 'N/A';
+  const d = new Date(dateString);
+  const day = d.getDate().toString().padStart(2, '0');
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`; // DD/MM/YYYY
+}
+
+export default function Profile() {
+  // -------- User & IDs --------
+  const { data: userData } = useQuery(GET_USER_INFO);
   const [userId, setUserId] = useState(null);
 
   useEffect(() => {
     if (userData?.user?.length > 0) setUserId(userData.user[0].id);
   }, [userData]);
 
-  const common = { skip: !userId, variables: { userId } };
+  // -------- Queries --------
+  const { data: xpData } = useQuery(GEt_Total_XPInKB, { variables: { userId }, skip: !userId });
+  const { data: piscineGoXPData } = useQuery(GET_PISCINE_GO_XP, { variables: { userId }, skip: !userId });
+  const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, { variables: { userId }, skip: !userId }); // لو احتجته لاحقًا
+  const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
+  const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
+  const { data: programStartData } = useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId });
 
-  const { data: xpData } = useQuery(GEt_Total_XPInKB, common);
-  const { data: piscineGoXPData } = useQuery(GET_PISCINE_GO_XP, common);
-  const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, common);
-  const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, common);
-  const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, common);
-  const { data: programStartData } = useQuery(GET_PROGRAM_START_DATE, common);
-
+  // -------- Compute XP --------
   const totalXP = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const piscineGoXP = piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
+  // حسب طلبك: لا نفصل piscine-js عن التوتال — نستثني piscine-go فقط
   const moduleOnlyXP = totalXP - piscineGoXP;
 
-  // Newest → Oldest
-  const projects = useMemo(() => {
-    return [...(projectsData?.transaction || [])].sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
-  }, [projectsData]);
+  // -------- Dates --------
+  const accountCreatedDate = userData?.user?.[0]?.createdAt || null;
+  const programStartDate = programStartData?.transaction?.[0]?.createdAt || null;
 
-  // Latest progress per project → pass/fail
-  const { passCount, failCount } = useMemo(() => {
-    const rows = passFailData?.progress || [];
-    // Ensure we have the needed fields
-    // Sort by createdAt desc so first seen per objectId is the latest
-    const sorted = [...rows].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const latestByProject = new Map();
-    for (const r of sorted) {
-      if (!latestByProject.has(r.objectId)) {
-        latestByProject.set(r.objectId, r);
-      }
-    }
-    const latest = Array.from(latestByProject.values());
-    const pass = latest.filter(r => r.grade !== null && r.grade >= 1).length;
-    const fail = latest.filter(r => r.grade !== null && r.grade < 1).length;
-    return { passCount: pass, failCount: fail };
-  }, [passFailData]);
-
-  // Correct dates:
-  const user = userData?.user?.[0];
-  const accountCreated = user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—';
-
-  // Started Program → earliest progress date; fallback to account created
-  const programStartISO = programStartData?.progress?.[0]?.createdAt || user?.createdAt || null;
-  const programStarted = programStartISO ? new Date(programStartISO).toLocaleDateString() : '—';
-
-  if (userLoading) return <div className="text-center text-purple-500 font-bold">Loading...</div>;
-  if (userError) return <div className="text-center text-red-500 font-bold">Error loading user.</div>;
+  // -------- Projects order: oldest -> newest --------
+  const projects = [...(projectsData?.transaction || [])].sort(
+    (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+  );
 
   return (
     <div className="p-4">
       <h1 className="text-3xl font-bold mb-4">User Profile</h1>
 
-      {user && (
+      {userData?.user?.[0] && (
         <div className="bg-white p-4 rounded shadow mb-6">
-          <p><strong>Login:</strong> {user.login}</p>
-          <p><strong>Email:</strong> {user.email}</p>
-          <p><strong>ID:</strong> {user.id}</p>
-
-          {/* Correct dates (no hardcoded values) */}
-          <p><strong>Account Created:</strong> {accountCreated}</p>
-          <p><strong>Started Program:</strong> {programStarted}</p>
-
+          <p><strong>Login:</strong> {userData.user[0].login}</p>
+          <p><strong>Email:</strong> {userData.user[0].email}</p>
+          <p><strong>ID:</strong> {userData.user[0].id}</p>
+          <p><strong>Account Created:</strong> {formatDateDMY(accountCreatedDate)}</p>
+          <p><strong>Started Program:</strong> {formatDateDMY(programStartDate)}</p>
           <p><strong>Total XP (excluding piscine-go):</strong> {formatXP(moduleOnlyXP)}</p>
         </div>
       )}
 
-      <h2 className="text-xl font-semibold mb-2">Projects</h2>
+      {/* -------- Finished Projects (oldest -> newest) -------- */}
+      <h2 className="text-xl font-semibold mb-2">Finished Projects</h2>
       {projects.length > 0 ? (
-        <ul className="space-y-3 mb-6">
+        <ul className="space-y-4 mb-6">
           {projects.map((p, i) => (
-            <li key={i} className="p-3 rounded-lg border border-gray-200">
-              <div className="font-medium">{p.object?.name}</div>
-              <div className="text-sm text-gray-600">
-                Completed: {new Date(p.createdAt).toLocaleDateString('en-US')} • {formatXP(p.amount)}
+            <li key={i} className="p-4 rounded-lg border border-gray-200 bg-gray-50">
+              <div className="font-semibold text-lg">{p.object?.name}</div>
+              <div className="text-sm text-gray-700">
+                Completed: {formatDateDMY(p.createdAt)}
+              </div>
+              <div className="text-sm text-gray-500">
+                {formatXP(p.amount)}
               </div>
             </li>
           ))}
@@ -111,10 +96,11 @@ function Profile() {
         <p>No project XP data found.</p>
       )}
 
+      {/* -------- Charts -------- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Pass/Fail Ratio</h2>
-          <PassFailChart passCount={passCount} failCount={failCount} />
+          <PassFailChart data={passFailData?.progress || passFailData?.result || []} />
         </div>
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">XP by Project</h2>
@@ -124,5 +110,3 @@ function Profile() {
     </div>
   );
 }
-
-export default Profile;
