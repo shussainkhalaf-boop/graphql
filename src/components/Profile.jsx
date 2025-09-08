@@ -1,4 +1,3 @@
-// src/components/Profile.jsx
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import {
@@ -10,17 +9,14 @@ import {
   GET_PISCINE_GO_XP,
   GET_PISCINE_JS_XP,
   GET_PROJECT_XP,
-  GET_FIRST_PROJECT_DATE
+  GET_PROGRAM_START_DATE
 } from '../graphql/queries';
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
 
 function formatDate(dateStr) {
-  const d = new Date(dateStr);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`;
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-GB'); // DD/MM/YYYY
 }
 
 function Profile() {
@@ -28,9 +24,7 @@ function Profile() {
   const [userId, setUserId] = useState(null);
 
   useEffect(() => {
-    if (userData?.user?.length > 0) {
-      setUserId(userData.user[0].id);
-    }
+    if (userData?.user?.length > 0) setUserId(userData.user[0].id);
   }, [userData]);
 
   const { data: xpdata } = useQuery(GEt_Total_XPInKB, { variables: { userId } });
@@ -40,30 +34,27 @@ function Profile() {
   const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId } });
   const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId } });
   const { data: latestProjectsData } = useQuery(GET_LATEST_PROJECTS_WITH_XP, { variables: { userId } });
-  const { data: firstProjectDateData } = useQuery(GET_FIRST_PROJECT_DATE, { variables: { userId } });
+  const { data: programStartData } = useQuery(GET_PROGRAM_START_DATE, { variables: { userId } });
 
-  const currentUser = userData?.user?.[0] || {};
-  const piscineGoXPTotal = piscineGoXPData?.transaction.reduce((sum, tx) => sum + tx.amount, 0) / 1000 || 0;
+  const currentUser = userData?.user[0] || {};
+  const piscineGoXPTotal = (piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
   const piscineJsXPTotal = (piscineJsXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
   const projectXPTotal = (projectXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0) / 1000;
   const totalXP = xpdata?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  const totalXPInKB = (totalXP / 1000).toFixed(2);
-  const projects = projectsData?.transaction || [];
+  const totalXPInKB = totalXP / 1000;
+
+  let totalXPFormatted = `${totalXPInKB.toFixed(2)} KB`;
+  if (totalXPInKB >= 1000) {
+    totalXPFormatted = `${(totalXPInKB / 1000).toFixed(2)} MB`;
+  }
+
+  const passCount = passFailData?.progress.filter(p => p.grade >= 1).length || 0;
+  const failCount = passFailData?.progress.filter(p => p.grade !== null && p.grade < 1).length || 0;
+
   const latestProjects = latestProjectsData?.transaction || [];
+  const projects = projectsData?.transaction || [];
 
-  const firstProjectDate = firstProjectDateData?.transaction?.[0]?.createdAt;
-  const startedProgram = firstProjectDate ? formatDate(firstProjectDate) : 'N/A';
-  const accountCreated = currentUser?.createdAt ? formatDate(currentUser.createdAt) : 'N/A';
-
-  const passCount = passFailData?.progress?.filter((item) => item.grade >= 1).length || 0;
-  const failCount = passFailData?.progress?.filter((item) => item.grade !== null && item.grade < 1).length || 0;
-
-  const handleLogout = () => {
-    if (window.confirm("Are you sure you want to log out?")) {
-      localStorage.removeItem("token");
-      window.location.href = "/login";
-    }
-  };
+  const programStartDate = programStartData?.transaction[0]?.createdAt;
 
   return (
     <div className="profile-bg">
@@ -71,7 +62,7 @@ function Profile() {
         <header className="flex justify-between items-center mb-6 bg-purple-700 text-white p-4 rounded-lg shadow-lg">
           <h1 className="text-3xl font-bold">School Profile</h1>
           <button
-            onClick={handleLogout}
+            onClick={() => { localStorage.removeItem('token'); window.location.href = '/login'; }}
             className="bg-red-500 text-white px-4 py-2 rounded shadow hover:bg-red-600 transition"
           >
             Logout
@@ -88,9 +79,7 @@ function Profile() {
                 <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 py-5">
                   <div className="flex items-center space-x-4 col-span-2 sm:col-span-1">
                     <div className="h-20 w-20 rounded-full bg-purple-500 flex items-center justify-center text-2xl font-bold text-white">
-                      {currentUser.firstName && currentUser.lastName
-                        ? `${currentUser.firstName[0]}${currentUser.lastName[0]}`
-                        : currentUser.login?.slice(0, 2).toUpperCase()}
+                      {currentUser.firstName?.[0]}{currentUser.lastName?.[0] || currentUser.login?.slice(0, 2).toUpperCase()}
                     </div>
                     <div>
                       <h2 className="text-2xl font-bold text-gray-900">{currentUser.firstName} {currentUser.lastName}</h2>
@@ -100,8 +89,8 @@ function Profile() {
                   <div className="space-y-2 col-span-2 sm:col-span-1">
                     <p><span className="font-semibold text-purple-600">ID:</span> {currentUser.id}</p>
                     <p><span className="font-semibold text-purple-600">Email:</span> {currentUser.email}</p>
-                    <p><span className="font-semibold text-purple-600">Started Program:</span> {startedProgram}</p>
-                    <p><span className="font-semibold text-purple-600">Account Created:</span> {accountCreated}</p>
+                    <p><span className="font-semibold text-purple-600">Started Program:</span> {formatDate(programStartDate)}</p>
+                    <p><span className="font-semibold text-purple-600">Account Created:</span> {formatDate(currentUser.createdAt)}</p>
                   </div>
                 </dl>
               </div>
@@ -114,7 +103,7 @@ function Profile() {
               <div className="border-t border-gray-200 px-4 py-5">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   <div className="col-span-2 sm:col-span-3">
-                    <p className="text-lg font-semibold text-purple-700">Total XP: {totalXPInKB} KB</p>
+                    <p className="text-lg font-semibold text-purple-700">Total XP: {totalXPFormatted}</p>
                   </div>
                   <div>
                     <p className="font-semibold text-purple-600">Piscine Go XP</p>
@@ -138,15 +127,13 @@ function Profile() {
               <h3 className="text-lg leading-6 font-medium">Finished Projects</h3>
             </div>
             <div className="border-t border-gray-200">
-              <div className="finished-projects-container px-4 py-5 h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500 scrollbar-track-gray-200">
+              <div className="px-4 py-5 h-[400px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500 scrollbar-track-gray-200">
                 {projects.map((project, index) => (
                   <div key={project.id} className="mb-4">
                     <div className="flex justify-between items-start">
                       <div>
                         <h3 className="font-semibold text-gray-900">{project.object?.name}</h3>
-                        <p className="text-sm text-gray-500">
-                          Completed: {formatDate(project.createdAt)}
-                        </p>
+                        <p className="text-sm text-gray-500">Completed: {formatDate(project.createdAt)}</p>
                       </div>
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                         {(project.amount / 1000).toFixed(2)} KB
