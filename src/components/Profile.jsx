@@ -12,7 +12,7 @@ import {
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
 
-// تواريخ ثابتة مطلوبة للعرض
+// تواريخ ثابتة (حسب طلبك)
 const ACCOUNT_CREATED_FIXED = '10/27/2023';
 const STARTED_PROGRAM_FIXED = '5/8/2024';
 
@@ -38,16 +38,15 @@ function Profile() {
   const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, { variables: { userId }, skip: !userId });
   const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
   const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
-  useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId }); // يبقى للاستيفاء بالروبرك حتى لو نعرض ثابت
+  useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId });
 
   const totalXP = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const piscineGoXP = piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  // ملاحظة: بناءً على طلبك "لا تفصل بيسين الجافا عن التوتال" نستثني piscine-go فقط
-  const moduleOnlyXP = totalXP - piscineGoXP;
+  const moduleOnlyXP = totalXP - piscineGoXP; // نستثني piscine-go فقط
 
-  // أقدم → أحدث
+  // الأحدث → الأقدم
   const projects = [...(projectsData?.transaction || [])].sort(
-    (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
   );
 
   return (
@@ -60,7 +59,7 @@ function Profile() {
           <p><strong>Email:</strong> {userData.user[0].email}</p>
           <p><strong>ID:</strong> {userData.user[0].id}</p>
 
-          {/* التواريخ المكتوبة حرفيًا */}
+          {/* التواريخ المكتوبة */}
           <p><strong>Account Created:</strong> {ACCOUNT_CREATED_FIXED}</p>
           <p><strong>Started Program:</strong> {STARTED_PROGRAM_FIXED}</p>
 
@@ -68,16 +67,21 @@ function Profile() {
         </div>
       )}
 
-      <h2 className="text-xl font-semibold mb-2">Latest Projects</h2>
+      <h2 className="text-xl font-semibold mb-2">Projects</h2>
       {projects.length > 0 ? (
-        <ul className="list-disc list-inside mb-6">
+        <ul className="space-y-3 mb-6">
           {projects.map((p, i) => (
-            <li key={i}>
-              {p.object?.name} - {formatXP(p.amount)} - {new Date(p.createdAt).toLocaleDateString('en-US')}
+            <li key={i} className="p-3 rounded-lg border border-gray-200">
+              <div className="font-medium">{p.object?.name}</div>
+              <div className="text-sm text-gray-600">
+                Completed: {new Date(p.createdAt).toLocaleDateString('en-US')} • {formatXP(p.amount)}
+              </div>
             </li>
           ))}
         </ul>
-      ) : <p>No project XP data found.</p>}
+      ) : (
+        <p>No project XP data found.</p>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-4 rounded shadow">
