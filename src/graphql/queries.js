@@ -1,137 +1,147 @@
+// src/graphql/queries.js
 import { gql } from '@apollo/client';
 
-// Normal Query: get user info
+/**
+ * Server-side aggregates (sum/max) for accuracy.
+ * XP amounts are in BYTES; convert only in the UI.
+ */
+
+// -- Basic user info
 export const GET_USER_INFO = gql`
   query GetUserDetails {
     user {
       id
       login
       email
-      createdAt
-      updatedAt
       firstName
       lastName
+      createdAt
+      updatedAt
     }
   }
 `;
 
-// Argument-based Query: get total xp
-export const GEt_Total_XPInKB = gql`
-query GetTotalXPInKB($userId: Int!) {
-  transaction_aggregate(where: { userId: { _eq: $userId }, type: { _eq: "xp" } }) {
-    aggregate {
-      sum {
-        amount
-      }
-    }
-  }
-}
-`;
-
-// Query to calculate piscineGoXP
-export const GET_PISCINE_GO_XP = gql`
-  query GetPiscineGoXP($userId: Int!) {
-    transaction(
-      where: {
-        userId: { _eq: $userId },
-        type: { _eq: "xp" },
-        path: { _like: "%bh-piscine%" }
-      }
+// -- Total XP (bytes)
+export const GET_TOTAL_XP_BYTES = gql`
+  query TotalXP($userId: Int!) {
+    transaction_aggregate(
+      where: { userId: { _eq: $userId }, type: { _eq: "xp" } }
     ) {
-      amount
+      aggregate { sum { amount } }
     }
   }
 `;
 
-
-// Query to calculate piscineJsXP
-export const GET_PISCINE_JS_XP = gql`
-  query GetPiscineJsXP($userId: Int!) {
+// -- Piscine GO XP (bytes) via path ilike
+export const GET_PISCINE_GO_XP_AGG = gql`
+  query PiscineGoXP($userId: Int!) {
     transaction_aggregate(
       where: {
-        userId: { _eq: $userId },
-        type: { _eq: "xp" },
-        event: {path: { _like: "%piscine-js%" }}
+        _and: [
+          { userId: { _eq: $userId } }
+          { type: { _eq: "xp" } }
+          { path: { _ilike: "%/piscine-go/%" } }
+        ]
       }
     ) {
-      aggregate {
-        sum {
-          amount
-        }
-      }
+      aggregate { sum { amount } }
     }
   }
 `;
 
-
-// Query to calculate projectXP from bhmodule
-export const GET_PROJECT_XP = gql`
-  query {
+// -- Piscine JS XP (bytes) via path ilike
+export const GET_PISCINE_JS_XP_AGG = gql`
+  query PiscineJsXP($userId: Int!) {
     transaction_aggregate(
       where: {
-        event: { path: { _eq: "/bahrain/bh-module" } }
+        _and: [
+          { userId: { _eq: $userId } }
+          { type: { _eq: "xp" } }
+          { path: { _ilike: "%/piscine-js/%" } }
+        ]
+      }
+    ) {
+      aggregate { sum { amount } }
+    }
+  }
+`;
+
+// -- Project XP (bytes) for the user (object.type="project")
+export const GET_PROJECTS_XP_AGG = gql`
+  query ProjectsXPAgg($userId: Int!) {
+    transaction_aggregate(
+      where: {
+        userId: { _eq: $userId }
         type: { _eq: "xp" }
+        object: { type: { _eq: "project" } }
       }
     ) {
-      aggregate {
-        sum {
-          amount
-        }
-      }
+      aggregate { sum { amount } }
     }
   }
-
 `;
 
-
-
+// -- Finished projects with XP (list for display)
 export const GET_PROJECTS_WITH_XP = gql`
   query GetProjectsAndXP($userId: Int!) {
     transaction(
       where: {
-        userId: { _eq: $userId },
-        type: { _eq: "xp" },
+        userId: { _eq: $userId }
+        type: { _eq: "xp" }
         object: { type: { _eq: "project" } }
       }
-        order_by: { createdAt: asc }
+      order_by: { createdAt: asc }
     ) {
       id
-      object {
-        name
-      }
       amount
       createdAt
+      object { name }
     }
   }
 `;
 
+// -- Latest 12 projects with XP (for charts)
+export const GET_LATEST_PROJECTS_WITH_XP = gql`
+  query GetLatestProjectsAndXP($userId: Int!) {
+    transaction(
+      where: {
+        userId: { _eq: $userId }
+        type: { _eq: "xp" }
+        object: { type: { _eq: "project" } }
+      }
+      order_by: { createdAt: desc }
+      limit: 12
+    ) {
+      id
+      amount
+      createdAt
+      object { name }
+    }
+  }
+`;
+
+// -- Pass/Fail (grade) for projects
 export const GET_PROJECTS_PASS_FAIL = gql`
   query GetProjectsPassFail($userId: Int!) {
-    progress(where: { userId: { _eq: $userId }, object: { type: { _eq: "project" } } }) {
+    progress(
+      where: {
+        userId: { _eq: $userId }
+        object: { type: { _eq: "project" } }
+      }
+    ) {
       grade
     }
   }
 `;
 
-export const GET_LATEST_PROJECTS_WITH_XP =gql`query GetLatestProjectsAndXP($userId: Int!) {
-  transaction(
-    where: {
-      userId: { _eq: $userId },
-      type: { _eq: "xp" },
-      object: { type: { _eq: "project" } }
+// -- Latest timestamps from transactions & results (for "Last Updated")
+export const Q_LAST_DATES = gql`
+  query LastDates($userId: Int!) {
+    transaction_aggregate(where: { userId: { _eq: $userId } }) {
+      aggregate { max { createdAt updatedAt } }
     }
-    order_by: { createdAt: desc }
-    limit: 12
-  ) {
-    id
-    object {
-      name
+    result_aggregate(where: { userId: { _eq: $userId } }) {
+      aggregate { max { createdAt updatedAt } }
     }
-    amount
-    createdAt
   }
-}
-  `;
-
-
-
+`;
