@@ -2,15 +2,16 @@ import React from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 
 function PassFailChart({ data }) {
-  const passCount = data.filter(item => item.grade >= 1).length;
-  const failCount = data.filter(item => item.grade < 1).length;
+  // 
+  const passCount = data.filter(item => (item.grade ?? 0) >= 1).length;
+  const failCount = data.filter(item => (item.grade ?? 0) < 1).length;
 
   const chartData = [
     { name: 'PASS', value: passCount },
     { name: 'FAIL', value: failCount },
   ];
 
-  const COLORS = ['#34d399', '#f87171'];
+  const COLORS = ['#34d399', '#f87171']; // 
 
   return (
     <PieChart width={500} height={400}>
