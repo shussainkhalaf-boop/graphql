@@ -1,5 +1,5 @@
 // src/components/Profile.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import {
   GET_USER_INFO,
@@ -11,7 +11,6 @@ import {
   GET_PISCINE_JS_XP_AGG,
   GET_PROJECTS_XP_AGG,
   Q_LAST_DATES,
-  // Q_FIRST_DATES,  // ⬅︎ no longer needed
 } from '../graphql/queries';
 import PassFailChart from './Graphs/PassFailChart';
 import XPByProjectChart from './Graphs/XPByProjectChart';
@@ -43,6 +42,7 @@ function formatDate(d, withTime = false) {
   }
 }
 
+// infer pass/fail from different grade shapes
 function isPassGrade(grade) {
   const g = grade;
   if (typeof g === 'boolean') return g;
@@ -56,36 +56,30 @@ function isPassGrade(grade) {
 
 export default function Profile() {
   // 1) User -> userId
-  const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
+  const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO, {
+    onError: (e) => console.error('GET_USER_INFO', e),
+  });
   const [userId, setUserId] = useState(null);
   useEffect(() => setUserId(userData?.user?.[0]?.id ?? null), [userData]);
 
+  // helper to attach common opts
+  const qOpts = (name) => ({
+    variables: { userId },
+    skip: !userId,
+    onError: (e) => console.error(name, e?.graphQLErrors ?? e),
+  });
+
   // 2) Queries (skip until userId is ready)
-  const { data: xpAgg, loading: xpLoading, error: xpError } =
-    useQuery(GET_TOTAL_XP_BYTES, { variables: { userId }, skip: !userId });
+  const { data: xpAgg, loading: xpLoading, error: xpError } = useQuery(GET_TOTAL_XP_BYTES, qOpts('GET_TOTAL_XP_BYTES'));
+  const { data: piscineGoAgg, loading: piscineGoLoading, error: piscineGoError } = useQuery(GET_PISCINE_GO_XP_AGG, qOpts('GET_PISCINE_GO_XP_AGG'));
+  const { data: piscineJsAgg, loading: piscineJsLoading, error: piscineJsError } = useQuery(GET_PISCINE_JS_XP_AGG, qOpts('GET_PISCINE_JS_XP_AGG'));
+  const { data: projectAgg, loading: projectAggLoading, error: projectAggError } = useQuery(GET_PROJECTS_XP_AGG, qOpts('GET_PROJECTS_XP_AGG'));
+  const { data: projectsData, loading: projectsLoading, error: projectsError } = useQuery(GET_PROJECTS_WITH_XP, qOpts('GET_PROJECTS_WITH_XP'));
+  const { data: passFailData, loading: passFailLoading, error: passFailError } = useQuery(GET_PROJECTS_PASS_FAIL, qOpts('GET_PROJECTS_PASS_FAIL'));
+  const { data: latestProjectsData, loading: latestProjectsLoading, error: latestProjectsError } = useQuery(GET_LATEST_PROJECTS_WITH_XP, qOpts('GET_LATEST_PROJECTS_WITH_XP'));
+  const { data: lastAgg, loading: lastLoading, error: lastError } = useQuery(Q_LAST_DATES, qOpts('Q_LAST_DATES'));
 
-  const { data: piscineGoAgg, loading: piscineGoLoading, error: piscineGoError } =
-    useQuery(GET_PISCINE_GO_XP_AGG, { variables: { userId }, skip: !userId });
-
-  const { data: piscineJsAgg, loading: piscineJsLoading, error: piscineJsError } =
-    useQuery(GET_PISCINE_JS_XP_AGG, { variables: { userId }, skip: !userId });
-
-  const { data: projectAgg, loading: projectAggLoading, error: projectAggError } =
-    useQuery(GET_PROJECTS_XP_AGG, { variables: { userId }, skip: !userId });
-
-  const { data: projectsData, loading: projectsLoading, error: projectsError } =
-    useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
-
-  const { data: passFailData, loading: passFailLoading, error: passFailError } =
-    useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
-
-  const { data: latestProjectsData, loading: latestProjectsLoading, error: latestProjectsError } =
-    useQuery(GET_LATEST_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
-
-  const { data: lastAgg, loading: lastLoading, error: lastError } =
-    useQuery(Q_LAST_DATES, { variables: { userId }, skip: !userId });
-
-  // Loading/Error UI
+  // Unified loading / error
   if (
     userLoading || xpLoading || projectsLoading || passFailLoading ||
     latestProjectsLoading || piscineGoLoading || piscineJsLoading ||
@@ -93,27 +87,49 @@ export default function Profile() {
   ) {
     return <div className="text-center text-purple-500 font-bold">Loading...</div>;
   }
+
   if (
     userError || xpError || projectsError || passFailError ||
     latestProjectsError || piscineGoError || piscineJsError ||
     projectAggError || lastError
   ) {
-    return <div className="text-center text-red-500 font-bold">Error loading data.</div>;
+    const errs = [
+      ['GET_USER_INFO', userError],
+      ['GET_TOTAL_XP_BYTES', xpError],
+      ['GET_PROJECTS_WITH_XP', projectsError],
+      ['GET_PROJECTS_PASS_FAIL', passFailError],
+      ['GET_LATEST_PROJECTS_WITH_XP', latestProjectsError],
+      ['GET_PISCINE_GO_XP_AGG', piscineGoError],
+      ['GET_PISCINE_JS_XP_AGG', piscineJsError],
+      ['GET_PROJECTS_XP_AGG', projectAggError],
+      ['Q_LAST_DATES', lastError],
+    ].filter(([, e]) => !!e);
+    // Log full errors to console
+    console.error('GraphQL errors:', errs.map(([k, e]) => [k, e?.message ?? e]));
+    return (
+      <div className="m-6 p-4 rounded-lg border border-red-300 bg-red-50 text-red-700">
+        <div className="font-bold mb-2">Error loading data.</div>
+        <ul className="list-disc ml-6 text-sm">
+          {errs.map(([k, e], i) => (
+            <li key={i}><span className="font-mono">{k}</span>: {e?.message || String(e)}</li>
+          ))}
+        </ul>
+        <div className="text-xs mt-2 text-red-600/80">Open the browser console for full details.</div>
+      </div>
+    );
   }
 
   // Values
   const currentUser = userData?.user?.[0] ?? {};
 
-  // ✅ Program Start must equal account createdAt (strict)
+  // ✅ Program Start MUST equal account createdAt
   const programStart = currentUser?.createdAt ? new Date(currentUser.createdAt) : null;
 
-  // Last Updated = latest across user + tx + result
+  // Last Updated = latest across user + transactions
   const maxTx = lastAgg?.transaction_aggregate?.aggregate?.max;
-  const maxRes = lastAgg?.result_aggregate?.aggregate?.max;
   const latestCandidates = [
     currentUser?.updatedAt,
     maxTx?.updatedAt, maxTx?.createdAt,
-    maxRes?.updatedAt, maxRes?.createdAt,
   ].filter(Boolean);
   const lastUpdated = latestCandidates.length
     ? new Date(Math.max(...latestCandidates.map((d) => Date.parse(d))))
@@ -133,11 +149,12 @@ export default function Profile() {
 
   const projects = projectsData?.transaction ?? [];
 
-  // Pass/Fail
-  const grades = passFailData?.progress ?? [];
+  // Pass/Fail (now from result)
+  const grades = passFailData?.result ?? [];
   const passCount = grades.filter((g) => isPassGrade(g?.grade)).length;
   const failCount = Math.max(0, grades.length - passCount);
 
+  // Latest 12 (chart)
   const latestProjects = latestProjectsData?.transaction ?? [];
 
   const initials = (currentUser.firstName && currentUser.lastName)
@@ -185,7 +202,6 @@ export default function Profile() {
                   <div className="space-y-2 col-span-2 sm:col-span-1">
                     <p><span className="font-semibold text-purple-600">ID:</span> {currentUser.id ?? '—'}</p>
                     <p><span className="font-semibold text-purple-600">Email:</span> {currentUser.email ?? '—'}</p>
-                    {/* show both explicitly so it's clear */}
                     <p><span className="font-semibold text-purple-600">Account Created:</span> {formatDate(programStart)}</p>
                     <p><span className="font-semibold text-purple-600">Program Start:</span> {formatDate(programStart)}</p>
                     <p><span className="font-semibold text-purple-600">Last Updated:</span> {formatDate(lastUpdated, true)}</p>
