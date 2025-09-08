@@ -1,32 +1,33 @@
 // src/components/Profile.jsx
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@apollo/client';
 import {
   GET_USER_INFO,
-  Q_TOTAL_XP,
-  Q_PISCINE_GO_XP,
-  Q_PISCINE_JS_XP,
+  GET_TOTAL_XP_BYTES,
   GET_PROJECTS_WITH_XP,
+  GET_PROJECTS_PASS_FAIL,
+  GET_LATEST_PROJECTS_WITH_XP,
+  GET_PISCINE_GO_XP_AGG,
+  GET_PISCINE_JS_XP_AGG,
+  GET_PROJECTS_XP_AGG,
   Q_LAST_DATES,
-  Q_RESULTS_GRADES,
 } from '../graphql/queries';
+import PassFailChart from './Graphs/PassFailChart';
+import XPByProjectChart from './Graphs/XPByProjectChart';
 
 // ---- Helpers ----
 const TZ = 'Asia/Bahrain';
 
-// Adaptive formatter: B -> KB / MB / GB with thresholds
+// Adaptive formatter (bytes -> KB / MB / GB)
 function formatAdaptive(bytes, digits = 2) {
   const b = Number(bytes || 0);
   const kb = b / 1024;
   if (!Number.isFinite(kb)) return { value: '0', unit: 'KB' };
+  if (kb < 1000) return { value: Math.round(kb).toString(), unit: 'KB' };
 
-  if (kb < 1000) {
-    return { value: Math.round(kb).toString(), unit: 'KB' };
-  }
   const mb = kb / 1024;
-  if (mb < 1000) {
-    return { value: mb.toFixed(digits), unit: 'MB' };
-  }
+  if (mb < 1000) return { value: mb.toFixed(digits), unit: 'MB' };
+
   const gb = mb / 1024;
   return { value: gb.toFixed(digits), unit: 'GB' };
 }
@@ -44,11 +45,11 @@ function formatDate(d, withTime = false) {
   }
 }
 
-// Robust pass/fail inference from result.grade
+// Robust pass/fail inference from various grade types
 function isPassGrade(grade) {
   const g = grade;
   if (typeof g === 'boolean') return g;
-  if (typeof g === 'number') return g > 0;
+  if (typeof g === 'number') return g >= 1;
   if (typeof g === 'string') {
     const s = g.trim().toLowerCase();
     return ['ok', 'pass', 'passed', 'success', 'successful', 'true', '1'].includes(s);
@@ -56,183 +57,138 @@ function isPassGrade(grade) {
   return false;
 }
 
-// Card stat component
-function Stat({ label, value }) {
-  return (
-    <div className="rounded-2xl p-4 bg-white/60 dark:bg-slate-900/50 shadow-sm border border-slate-200/50 dark:border-slate-700/50">
-      <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums break-words">{value}</div>
-    </div>
-  );
-}
-
 export default function Profile() {
-  // 1) User (for id + created/updated)
+  // 1) User -> userId
   const { data: userData, loading: userLoading, error: userError } = useQuery(GET_USER_INFO);
-  const user = Array.isArray(userData?.user) ? userData.user[0] : null;
-  const userId = user?.id ?? null;
+  const [userId, setUserId] = useState(null);
 
-  // 2) Aggregates
-  const { data: totalAgg, loading: totalLoading, error: totalErr } = useQuery(Q_TOTAL_XP, {
-    skip: !userId,
+  useEffect(() => {
+    const uid = userData?.user?.[0]?.id ?? null;
+    setUserId(uid);
+  }, [userData]);
+
+  // 2) Queries that depend on userId (skip until available)
+  const { data: xpAgg, loading: xpLoading, error: xpError } = useQuery(GET_TOTAL_XP_BYTES, {
     variables: { userId },
-    fetchPolicy: 'cache-first',
-  });
-  const { data: goAgg, loading: goLoading, error: goErr } = useQuery(Q_PISCINE_GO_XP, {
     skip: !userId,
-    variables: { userId },
-    fetchPolicy: 'cache-first',
-  });
-  const { data: jsAgg, loading: jsLoading, error: jsErr } = useQuery(Q_PISCINE_JS_XP, {
-    skip: !userId,
-    variables: { userId },
-    fetchPolicy: 'cache-first',
   });
 
-  // 3) Latest activity timestamps ("Last Updated")
-  const { data: lastAgg, loading: lastLoading, error: lastErr } = useQuery(Q_LAST_DATES, {
-    skip: !userId,
-    variables: { userId },
-    fetchPolicy: 'cache-first',
-  });
+  const { data: piscineGoAgg, loading: piscineGoLoading, error: piscineGoError } =
+    useQuery(GET_PISCINE_GO_XP_AGG, { variables: { userId }, skip: !userId });
 
-  // 4) Results for pass/fail %
-  const { data: resData, loading: resLoading, error: resErr } = useQuery(Q_RESULTS_GRADES, {
-    skip: !userId,
-    variables: { userId, limit: 2000 },
-    fetchPolicy: 'cache-first',
-  });
+  const { data: piscineJsAgg, loading: piscineJsLoading, error: piscineJsError } =
+    useQuery(GET_PISCINE_JS_XP_AGG, { variables: { userId }, skip: !userId });
 
-  // 5) Projects (display-only)
-  const { data: projData } = useQuery(GET_PROJECTS_WITH_XP, {
-    skip: !userId,
-    variables: { userId, limit: 50 },
-    fetchPolicy: 'cache-first',
-  });
+  const { data: projectAgg, loading: projectAggLoading, error: projectAggError } =
+    useQuery(GET_PROJECTS_XP_AGG, { variables: { userId }, skip: !userId });
 
-  // --- Extract values (bytes) ---
-  const totalBytes = totalAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
-  const piscineGoBytes = goAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
-  const piscineJsBytes = jsAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+  const { data: projectsData, loading: projectsLoading, error: projectsError } =
+    useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
 
-  // Module XP = Total - Piscine GO (keep JS in the module)
-  const moduleBytes = Math.max(0, Number(totalBytes) - Number(piscineGoBytes));
+  const { data: passFailData, loading: passFailLoading, error: passFailError } =
+    useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
 
-  // Adaptive unit conversions for all XP stats
-  const totalDisp = formatAdaptive(totalBytes);      // Total
-  const goDisp    = formatAdaptive(piscineGoBytes);  // Piscine GO
-  const jsDisp    = formatAdaptive(piscineJsBytes);  // Piscine JS
-  const moduleDisp= formatAdaptive(moduleBytes);     // Module XP
+  const { data: latestProjectsData, loading: latestProjectsLoading, error: latestProjectsError } =
+    useQuery(GET_LATEST_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
 
-  // Program Start & Last Updated
-  const programStart = user?.createdAt ? new Date(user.createdAt) : null;
+  const { data: lastAgg, loading: lastLoading, error: lastError } =
+    useQuery(Q_LAST_DATES, { variables: { userId }, skip: !userId });
+
+  // Loading/Error states
+  if (
+    userLoading || xpLoading || projectsLoading || passFailLoading ||
+    latestProjectsLoading || piscineGoLoading || piscineJsLoading ||
+    projectAggLoading || lastLoading
+  ) {
+    return <div className="text-center text-purple-500 font-bold">Loading...</div>;
+  }
+
+  if (
+    userError || xpError || projectsError || passFailError ||
+    latestProjectsError || piscineGoError || piscineJsError ||
+    projectAggError || lastError
+  ) {
+    return <div className="text-center text-red-500 font-bold">Error loading data.</div>;
+  }
+
+  // Values
+  const currentUser = userData?.user?.[0] ?? {};
+  const totalBytes = xpAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+  const piscineGoBytes = piscineGoAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+  const piscineJsBytes = piscineJsAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+  const projectBytes = projectAgg?.transaction_aggregate?.aggregate?.sum?.amount ?? 0;
+
+  // Adaptive units for top KPIs
+  const totalDisp = formatAdaptive(totalBytes);
+  const piscineGoDisp = formatAdaptive(piscineGoBytes);
+  const piscineJsDisp = formatAdaptive(piscineJsBytes);
+  const projectDisp = formatAdaptive(projectBytes);
+
+  const projects = projectsData?.transaction ?? [];
+
+  // Pass/Fail
+  const grades = passFailData?.progress ?? [];
+  const passCount = grades.filter((g) => isPassGrade(g?.grade)).length;
+  const failCount = grades.length - passCount;
+
+  // Program Start (createdAt) & Last Updated (latest across user/tx/result)
+  const programStart = currentUser?.createdAt ? new Date(currentUser.createdAt) : null;
+
   const lastCandidates = [
-    user?.updatedAt,
+    currentUser?.updatedAt,
     lastAgg?.transaction_aggregate?.aggregate?.max?.updatedAt,
     lastAgg?.transaction_aggregate?.aggregate?.max?.createdAt,
     lastAgg?.result_aggregate?.aggregate?.max?.updatedAt,
     lastAgg?.result_aggregate?.aggregate?.max?.createdAt,
-  ]
-    .filter(Boolean)
-    .map((x) => Date.parse(x))
-    .filter((x) => Number.isFinite(x));
-  const lastUpdated =
-    lastCandidates.length > 0 ? new Date(Math.max(...lastCandidates)) : (user?.updatedAt ? new Date(user.updatedAt) : null);
+  ].filter(Boolean);
 
-  // Pass / Fail %
-  const results = resData?.result ?? [];
-  const totalResults = results.length;
-  const passCount = results.reduce((acc, r) => (isPassGrade(r?.grade) ? acc + 1 : acc), 0);
-  const failCount = totalResults - passCount;
-  const passPct = totalResults ? Math.round((passCount / totalResults) * 100) : 0;
-  const failPct = totalResults ? 100 - passPct : 0;
+  const lastUpdated = lastCandidates.length
+    ? new Date(Math.max(...lastCandidates.map((d) => Date.parse(d))))
+    : (currentUser?.updatedAt ? new Date(currentUser.updatedAt) : null);
 
-  // Projects table rows (adaptive per row)
-  const projRows = useMemo(() => {
-    const list = projData?.transaction ?? [];
-    return list.slice(0, 10).map((t) => {
-      const disp = formatAdaptive(Number(t?.amount || 0));
-      return {
-        name: t?.object?.name || 'Unknown',
-        xp: `${disp.value} ${disp.unit}`,
-        date: t?.createdAt ? formatDate(t.createdAt, false) : '—',
-      };
-    });
-  }, [projData]);
+  // Latest projects list for chart (pass raw bytes; chart can convert, or adapt here)
+  const latestProjects = latestProjectsData?.transaction ?? [];
 
-  const anyLoading = userLoading || totalLoading || goLoading || jsLoading || lastLoading || resLoading;
-  const anyError = userError || totalErr || goErr || jsErr || lastErr || resErr;
+  const initials = (currentUser.firstName && currentUser.lastName)
+    ? `${currentUser.firstName[0]}${currentUser.lastName[0]}`
+    : (currentUser.login || 'NA').slice(0, 2).toUpperCase();
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold">Profile</h1>
-        {user && (
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            {user.firstName || ''} {user.lastName || ''} — <span className="font-mono">{user.login}</span>
-          </p>
-        )}
-      </header>
+    <div className="profile-bg">
+      <div className="container mx-auto p-4 bg-gray-100 bg-opacity-20">
+        <header className="flex justify-between items-center mb-6 bg-purple-700 text-white p-4 rounded-lg shadow-lg">
+          <h1 className="text-3xl font-bold">School Profile</h1>
+          <button
+            onClick={() => {
+              if (window.confirm('Are you sure you want to log out?')) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+              }
+            }}
+            className="bg-red-500 text-white px-4 py-2 rounded shadow hover:bg-red-600 transition"
+          >
+            Logout
+          </button>
+        </header>
 
-      {anyLoading && <div className="animate-pulse text-slate-500">Loading…</div>}
-      {anyError && (
-        <div className="text-red-600">
-          Failed to fetch data. Please check your connection and JWT.
-        </div>
-      )}
-
-      {!anyLoading && !anyError && (
-        <>
-          {/* Dates & Success ratio */}
-          <section className="grid gap-4 md:grid-cols-4 mb-6">
-            <Stat label="Program Start" value={formatDate(programStart, false)} />
-            <Stat label="Last Updated" value={formatDate(lastUpdated, true)} />
-            <Stat label="Pass %" value={`${passPct}%`} />
-            <Stat label="Fail %" value={`${failPct}%`} />
-          </section>
-
-          {/* XP stats — ALL adaptive */}
-          <section className="grid gap-4 md:grid-cols-4">
-            <Stat label={`Total XP (${totalDisp.unit})`} value={totalDisp.value} />
-            <Stat label={`Piscine GO (${goDisp.unit})`} value={goDisp.value} />
-            <Stat label={`Piscine JS (${jsDisp.unit})`} value={jsDisp.value} />
-            <Stat label={`Module XP (${moduleDisp.unit})`} value={moduleDisp.value} />
-          </section>
-
-          {/* Projects list (display only) */}
-          <section className="mt-8">
-            <h2 className="text-lg font-semibold mb-3">Latest Project XP Transactions</h2>
-            <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-800/50">
-                  <tr>
-                    <th className="text-left p-3">Project</th>
-                    <th className="text-left p-3">XP</th>
-                    <th className="text-left p-3">Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {projRows.length === 0 && (
-                    <tr>
-                      <td className="p-3" colSpan={3}>No data.</td>
-                    </tr>
-                  )}
-                  {projRows.map((r, i) => (
-                    <tr key={i} className="odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-900 dark:even:bg-slate-800/30">
-                      <td className="p-3">{r.name}</td>
-                      <td className="p-3 tabular-nums">{r.xp}</td>
-                      <td className="p-3">{r.date}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-slate-500 mt-2">
-              Note: This list is for display only (limit=50). Real totals come from aggregate queries.
-            </p>
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 space-y-6">
+            {/* Basic Info */}
+            <div className="bg-white shadow-lg rounded-lg overflow-hidden">
+              <div className="px-4 py-5 sm:px-6 bg-purple-600 text-white">
+                <h3 className="text-lg leading-6 font-medium">Basic Information</h3>
+              </div>
+              <div className="border-t border-gray-200">
+                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-4 py-5">
+                  <div className="flex items-center space-x-4 col-span-2 sm:col-span-1">
+                    <div className="h-20 w-20 rounded-full bg-purple-500 flex items-center justify-center text-2xl font-bold text-white">
+                      {initials}
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-900">
+                        {(currentUser.firstName || '') + ' ' + (currentUser.lastName || '')}
+                      </h2>
+                      <p className="text-purple-600">@{currentUser.login}</p>
+                    </div>
+                  </div>
+                  <div className="space-y-2 col-span-2 sm:col-span-1">
