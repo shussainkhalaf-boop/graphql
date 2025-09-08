@@ -14,24 +14,21 @@ import {
 // ---- Helpers ----
 const TZ = 'Asia/Bahrain';
 
-function kb(n) {
-  return Math.round((Number(n || 0)) / 1024);
-}
-
-// Total in MB; if ≥ 1000 MB, switch to GB (two decimals)
-function formatMBorGB(bytes, digits = 2) {
+// Adaptive formatter: B -> KB / MB / GB with thresholds
+function formatAdaptive(bytes, digits = 2) {
   const b = Number(bytes || 0);
-  const mb = b / (1024 * 1024);
-  if (!Number.isFinite(mb)) return { value: '0.00', unit: 'MB' };
-  if (mb >= 1000) {
-    const gb = b / (1024 * 1024 * 1024);
-    return { value: gb.toFixed(digits), unit: 'GB' };
-  }
-  return { value: mb.toFixed(digits), unit: 'MB' };
-}
+  const kb = b / 1024;
+  if (!Number.isFinite(kb)) return { value: '0', unit: 'KB' };
 
-function formatInt(n) {
-  return new Intl.NumberFormat().format(Number(n || 0));
+  if (kb < 1000) {
+    return { value: Math.round(kb).toString(), unit: 'KB' };
+  }
+  const mb = kb / 1024;
+  if (mb < 1000) {
+    return { value: mb.toFixed(digits), unit: 'MB' };
+  }
+  const gb = mb / 1024;
+  return { value: gb.toFixed(digits), unit: 'GB' };
 }
 
 function formatDate(d, withTime = false) {
@@ -121,11 +118,11 @@ export default function Profile() {
   // Module XP = Total - Piscine GO (keep JS in the module)
   const moduleBytes = Math.max(0, Number(totalBytes) - Number(piscineGoBytes));
 
-  // Display conversions
-  const totalDynamic = formatMBorGB(totalBytes);              // Total in MB/GB
-  const goKB = formatInt(kb(piscineGoBytes));                 // KB
-  const jsKB = formatInt(kb(piscineJsBytes));                 // KB
-  const moduleKB = formatInt(kb(moduleBytes));                // KB
+  // Adaptive unit conversions for all XP stats
+  const totalDisp = formatAdaptive(totalBytes);      // Total
+  const goDisp    = formatAdaptive(piscineGoBytes);  // Piscine GO
+  const jsDisp    = formatAdaptive(piscineJsBytes);  // Piscine JS
+  const moduleDisp= formatAdaptive(moduleBytes);     // Module XP
 
   // Program Start & Last Updated
   const programStart = user?.createdAt ? new Date(user.createdAt) : null;
@@ -150,14 +147,17 @@ export default function Profile() {
   const passPct = totalResults ? Math.round((passCount / totalResults) * 100) : 0;
   const failPct = totalResults ? 100 - passPct : 0;
 
-  // Projects table rows
+  // Projects table rows (adaptive per row)
   const projRows = useMemo(() => {
     const list = projData?.transaction ?? [];
-    return list.slice(0, 10).map((t) => ({
-      name: t?.object?.name || 'Unknown',
-      xpKB: formatInt(Math.round((Number(t?.amount || 0)) / 1024)),
-      date: t?.createdAt ? formatDate(t.createdAt, false) : '—',
-    }));
+    return list.slice(0, 10).map((t) => {
+      const disp = formatAdaptive(Number(t?.amount || 0));
+      return {
+        name: t?.object?.name || 'Unknown',
+        xp: `${disp.value} ${disp.unit}`,
+        date: t?.createdAt ? formatDate(t.createdAt, false) : '—',
+      };
+    });
   }, [projData]);
 
   const anyLoading = userLoading || totalLoading || goLoading || jsLoading || lastLoading || resLoading;
@@ -191,12 +191,12 @@ export default function Profile() {
             <Stat label="Fail %" value={`${failPct}%`} />
           </section>
 
-          {/* XP stats */}
+          {/* XP stats — ALL adaptive */}
           <section className="grid gap-4 md:grid-cols-4">
-            <Stat label={`Total XP (${totalDynamic.unit})`} value={totalDynamic.value} />
-            <Stat label="Piscine GO (KB)" value={goKB} />
-            <Stat label="Piscine JS (KB)" value={jsKB} />
-            <Stat label="Module XP (KB) = Total - GO" value={moduleKB} />
+            <Stat label={`Total XP (${totalDisp.unit})`} value={totalDisp.value} />
+            <Stat label={`Piscine GO (${goDisp.unit})`} value={goDisp.value} />
+            <Stat label={`Piscine JS (${jsDisp.unit})`} value={jsDisp.value} />
+            <Stat label={`Module XP (${moduleDisp.unit})`} value={moduleDisp.value} />
           </section>
 
           {/* Projects list (display only) */}
@@ -207,7 +207,7 @@ export default function Profile() {
                 <thead className="bg-slate-50 dark:bg-slate-800/50">
                   <tr>
                     <th className="text-left p-3">Project</th>
-                    <th className="text-left p-3">XP (KB)</th>
+                    <th className="text-left p-3">XP</th>
                     <th className="text-left p-3">Date</th>
                   </tr>
                 </thead>
@@ -220,7 +220,7 @@ export default function Profile() {
                   {projRows.map((r, i) => (
                     <tr key={i} className="odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-900 dark:even:bg-slate-800/30">
                       <td className="p-3">{r.name}</td>
-                      <td className="p-3 tabular-nums">{r.xpKB}</td>
+                      <td className="p-3 tabular-nums">{r.xp}</td>
                       <td className="p-3">{r.date}</td>
                     </tr>
                   ))}
