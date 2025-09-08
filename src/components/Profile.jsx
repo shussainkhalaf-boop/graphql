@@ -20,17 +20,16 @@ function formatXP(bytes) {
   return bytes + ' B';
 }
 
+// ⬇️ صيغة ثابتة DD/MM/YYYY بغض النظر عن لغة المتصفح
+const fmtDMY = new Intl.DateTimeFormat('en-GB', {
+  day: '2-digit', month: '2-digit', year: 'numeric'
+});
 function formatDateDMY(dateString) {
   if (!dateString) return 'N/A';
-  const d = new Date(dateString);
-  const day = d.getDate().toString().padStart(2, '0');
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  const year = d.getFullYear();
-  return `${day}/${month}/${year}`; // DD/MM/YYYY
+  return fmtDMY.format(new Date(dateString));
 }
 
 export default function Profile() {
-  // -------- User & IDs --------
   const { data: userData } = useQuery(GET_USER_INFO);
   const [userId, setUserId] = useState(null);
 
@@ -38,25 +37,20 @@ export default function Profile() {
     if (userData?.user?.length > 0) setUserId(userData.user[0].id);
   }, [userData]);
 
-  // -------- Queries --------
-  const { data: xpData } = useQuery(GEt_Total_XPInKB, { variables: { userId }, skip: !userId });
-  const { data: piscineGoXPData } = useQuery(GET_PISCINE_GO_XP, { variables: { userId }, skip: !userId });
-  const { data: piscineJsXPData } = useQuery(GET_PISCINE_JS_XP, { variables: { userId }, skip: !userId }); // لو احتجته لاحقًا
-  const { data: projectsData } = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
-  const { data: passFailData } = useQuery(GET_PROJECTS_PASS_FAIL, { variables: { userId }, skip: !userId });
-  const { data: programStartData } = useQuery(GET_PROGRAM_START_DATE, { variables: { userId }, skip: !userId });
+  const { data: xpData }            = useQuery(GEt_Total_XPInKB,     { variables: { userId }, skip: !userId });
+  const { data: piscineGoXPData }   = useQuery(GET_PISCINE_GO_XP,    { variables: { userId }, skip: !userId });
+  const { data: projectsData }      = useQuery(GET_PROJECTS_WITH_XP, { variables: { userId }, skip: !userId });
+  const { data: passFailData }      = useQuery(GET_PROJECTS_PASS_FAIL,{ variables: { userId }, skip: !userId });
+  const { data: programStartData }  = useQuery(GET_PROGRAM_START_DATE,{ variables: { userId }, skip: !userId });
 
-  // -------- Compute XP --------
-  const totalXP = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
+  const totalXP     = xpData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
   const piscineGoXP = piscineGoXPData?.transaction_aggregate?.aggregate?.sum?.amount || 0;
-  // حسب طلبك: لا نفصل piscine-js عن التوتال — نستثني piscine-go فقط
-  const moduleOnlyXP = totalXP - piscineGoXP;
+  const moduleOnlyXP = totalXP - piscineGoXP; // نستثني piscine-go فقط
 
-  // -------- Dates --------
   const accountCreatedDate = userData?.user?.[0]?.createdAt || null;
-  const programStartDate = programStartData?.transaction?.[0]?.createdAt || null;
+  const programStartDate   = programStartData?.transaction?.[0]?.createdAt || null;
 
-  // -------- Projects order: oldest -> newest --------
+  // الأقدم → الأحدث (عشان قائمتك تبدأ بـ go-reloaded ثم ascii-art ...)
   const projects = [...(projectsData?.transaction || [])].sort(
     (a, b) => new Date(a.createdAt) - new Date(b.createdAt)
   );
@@ -96,7 +90,6 @@ export default function Profile() {
         <p>No project XP data found.</p>
       )}
 
-      {/* -------- Charts -------- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Pass/Fail Ratio</h2>
