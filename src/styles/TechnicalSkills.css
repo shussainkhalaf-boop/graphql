@@ -1,0 +1,13 @@
+.radar-chart-container {
+    background: #2e2e40;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    padding: 1.5rem;
+    color: #dcdde1;
+}
+
+.radar-chart-title {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}

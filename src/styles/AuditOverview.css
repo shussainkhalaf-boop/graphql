@@ -1,0 +1,55 @@
+.audit-overview-container {
+    background: #2e2e40;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    padding: 1.5rem;
+    color: #dcdde1;
+}
+
+.audit-ratio-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background-color: #2c3e50;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.audit-ratio-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+.audit-ratio-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.audit-message {
+    font-size: 1rem;
+    margin-top: 0.5rem;
+    text-align: center;
+}
+
+/* Tooltip styles for Audit Overview */
+.audit-tooltip .tooltip-content {
+    background-color: #2e2e40;
+    border-radius: 8px;
+    border: 1px solid #9b59b6;
+    color: #dcdde1;
+    padding: 0.5rem;
+}
+
+.audit-tooltip .tooltip-item {
+    color: #dcdde1;
+}
+
+.audit-tooltip .tooltip-label {
+    color: #ffffff;
+}

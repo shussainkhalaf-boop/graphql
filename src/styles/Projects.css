@@ -1,0 +1,41 @@
+.transactions-container {
+    background: #2e2e40;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    padding: 1.5rem;
+    color: #dcdde1;
+}
+
+.transactions-title {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+.transactions-list {
+    max-height: 450px;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+.transaction-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #2c3e50;
+    border: 1px solid #3c3c50;
+    padding: 1rem;
+    border-radius: 5px;
+    margin-bottom: 1rem;
+    color: #ffffff;
+}
+
+.transaction-details h3 {
+    font-size: 1.2rem;
+    color: #ffffff;
+}
+
+.transaction-xp {
+    font-weight: bold;
+    color: #29d5a4;
+}

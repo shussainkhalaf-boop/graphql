@@ -1,0 +1,237 @@
+/* Global Styles */
+/* Prevent horizontal scrolling */
+body {
+    font-family: Arial, sans-serif;
+    background-color: #1a1a2e;
+    color: #ffffff;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    /* Disable horizontal scrolling */
+    overflow-y: auto;
+    /* Enable vertical scrolling */
+    box-sizing: border-box;
+    /* Ensure padding and border are included in width/height */
+}
+
+/* Ensure content fits within the container */
+.profile-container {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    background-color: #1a1a2e;
+    box-sizing: border-box;
+    /* Includes padding in the element's width */
+}
+
+/* Header Section */
+.profile-header {
+    grid-column: span 3;
+    text-align: center;
+    background-color: #9b59b6;
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 1.5rem;
+    font-size: 1.5rem;
+    /* Adjusted font size */
+    font-weight: bold;
+}
+
+/* Information Section */
+.profile-information {
+    background-color: #2e2e40;
+    border-radius: 10px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    color: #dcdde1;
+}
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    /* Default layout: 2 items per row */
+    gap: 1rem;
+    /* Spacing between items */
+}
+
+.info-card {
+    padding: 1rem;
+    border-radius: 8px;
+    background-color: #2c3e50;
+    /* Slightly darker for a nested effect */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    color: #dcdde1;
+    word-wrap: break-word;
+    /* Prevent overflow of long content */
+}
+
+.info-label {
+    font-size: 0.9rem;
+    /* Reduced font size for labels */
+    color: #9b59b6;
+    margin-bottom: 0.5rem;
+}
+
+.info-value {
+    font-size: 1.1rem;
+    font-weight: bold;
+}
+
+/* General Card Styles */
+.profile-card,
+.xp-chart-container,
+.audit-overview-container,
+.radar-chart-container,
+.transactions-container,
+.audit-status-container {
+    background: #2e2e40;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    padding: 1.5rem;
+    color: #dcdde1;
+}
+
+/* Charts Section Titles */
+.xp-chart-title,
+.audit-overview-title,
+.radar-chart-title,
+.transactions-title,
+.audit-status-container h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+
+/* Transactions Section */
+.transactions-list {
+    max-height: 450px;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+/* Responsive Styles */
+/* Fix for mobile view to remove horizontal scrolling */
+@media (max-width: 768px) {
+    .profile-container {
+        display: flex;
+        flex-direction: column;
+        /* Stack components vertically */
+        gap: 15px;
+        padding: 1rem;
+        max-width: 100%;
+        /* Prevent container from exceeding screen width */
+        overflow-x: hidden;
+        /* Ensure no horizontal overflow */
+    }
+
+    .profile-container>* {
+        width: 100%;
+        /* Ensure child elements do not exceed container width */
+        box-sizing: border-box;
+        /* Include padding/borders in width */
+    }
+
+    /* Header adjustments for smaller screens */
+    .profile-header {
+        font-size: 1.2rem;
+        /* Reduce font size for mobile */
+        padding: 1rem;
+    }
+
+    /* Information Section adjustments */
+    .info-grid {
+        display: flex;
+        /* Use flexbox for easier control */
+        flex-direction: column;
+        /* Stack items vertically */
+        gap: 10px;
+        /* Add spacing between items */
+        width: 100%;
+        /* Ensure no overflow */
+        padding: 0;
+        /* Remove additional padding */
+        margin: 0 auto;
+        /* Center the grid */
+        box-sizing: border-box;
+        /* Include padding/border in width */
+    }
+
+    .info-card {
+        width: 100%;
+        /* Ensure cards take full width */
+        box-sizing: border-box;
+        /* Include padding and border in the width */
+        padding: 0.8rem;
+        /* Adjust padding for smaller screens */
+        font-size: 0.85rem;
+        /* Adjust font size for better fit */
+    }
+}
+
+/* Extra Small View Styles: For screens 480px and below */
+@media (max-width: 480px) {
+    .profile-container {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 0.8rem;
+        max-width: 100%;
+        /* Prevent container from exceeding screen width */
+        overflow-x: hidden;
+    }
+
+    .profile-container>* {
+        width: 100%;
+        /* Ensure child elements do not exceed container width */
+        box-sizing: border-box;
+    }
+
+    /* Header adjustments for very small screens */
+    .profile-header {
+        font-size: 1rem;
+        /* Further reduce font size */
+        padding: 0.8rem;
+    }
+
+    /* Information Section adjustments */
+    .info-grid {
+        display: flex;
+        /* Keep using flexbox */
+        flex-direction: column;
+        /* Stack items vertically */
+        gap: 8px;
+        /* Reduce spacing for smaller screens */
+        width: 100%;
+        /* Ensure no overflow */
+        margin: 0 auto;
+        /* Center the grid */
+    }
+
+    .info-card {
+        width: 100%;
+        /* Ensure cards take full width */
+        box-sizing: border-box;
+        /* Include padding and border in the width */
+        padding: 0.7rem;
+        /* Reduce padding further */
+        font-size: 0.8rem;
+        /* Smaller font for extra small screens */
+    }
+
+    /* General card adjustments for extra small screens */
+    .xp-chart-container,
+    .audit-overview-container,
+    .radar-chart-container,
+    .transactions-container,
+    .audit-status-container {
+        width: 100%;
+        margin: 0 auto;
+        padding: 0.8rem;
+        overflow-x: hidden;
+        box-sizing: border-box;
+    }
+}

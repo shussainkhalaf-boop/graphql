@@ -1,0 +1,197 @@
+/* src/styles/LoginPage.css */
+body {
+    font-family: "Arial", sans-serif;
+    background: radial-gradient(circle at center, #1a1a2e 0%, #0f0f1b 100%);
+    margin: 0;
+    color: #ffffff;
+    overflow: hidden;
+}
+
+.login-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    position: relative;
+    z-index: 1;
+    padding: 1rem;
+    /* Ensures spacing on smaller screens */
+}
+
+.login-card {
+    background: rgba(46, 46, 64, 0.95);
+    /* Slight transparency */
+    backdrop-filter: blur(10px);
+    /* Glassmorphism effect */
+    padding: 3rem;
+    border-radius: 16px;
+    box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
+    width: 400px;
+    max-width: 100%;
+    /* Ensures the card doesn't exceed screen width */
+    text-align: left;
+    /* Aligns all text to the left */
+}
+
+.brand-title {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #9b59b6;
+    margin-bottom: 1rem;
+    letter-spacing: 1px;
+    text-align: center;
+    /* Keeps the title centered */
+}
+
+.tagline {
+    font-size: 1rem;
+    color: #dcdde1;
+    margin-bottom: 2rem;
+    text-align: center;
+    /* Keeps the tagline centered */
+}
+
+.input-group {
+    margin-bottom: 1.5rem;
+}
+
+.input-group label {
+    display: block;
+    font-size: 0.9rem;
+    color: #9b59b6;
+    margin-bottom: 0.5rem;
+}
+
+.input-group input {
+    width: 100%;
+    padding: 0.8rem;
+    border: 1px solid #555;
+    border-radius: 8px;
+    background-color: #1a1a2e;
+    color: #ffffff;
+    font-size: 0.9rem;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.input-group input:focus {
+    border-color: #9b59b6;
+    outline: none;
+    box-shadow: 0 0 10px rgba(155, 89, 182, 0.8);
+}
+
+.login-button {
+    width: 100%;
+    padding: 0.8rem;
+    background-color: #29d5a4;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.login-button:hover {
+    background-color: #22b08e;
+    transform: translateY(-2px);
+}
+
+.login-button:active {
+    background-color: #1d9172;
+    transform: translateY(0);
+}
+
+.error-message {
+    color: #e74c3c;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+}
+
+.login-container::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: url('https://www.transparenttextures.com/patterns/asfalt-dark.png');
+    opacity: 0.3;
+    z-index: -1;
+}
+
+/* Media Queries for Responsiveness */
+
+/* For smaller screens (tablets and below) */
+@media (max-width: 768px) {
+    .login-card {
+        padding: 2rem;
+        /* Reduce padding on smaller screens */
+        width: 100%;
+        /* Full width for smaller devices */
+        max-width: 90%;
+        /* Ensure some spacing on the sides */
+        border-radius: 12px;
+        /* Keep rounded edges */
+    }
+
+    .brand-title {
+        font-size: 1.8rem;
+        /* Adjust font size */
+    }
+
+    .tagline {
+        font-size: 0.9rem;
+        /* Reduce tagline font size */
+        margin-bottom: 1.5rem;
+    }
+
+    .input-group label {
+        font-size: 0.85rem;
+        /* Adjust label size */
+    }
+
+    .input-group input {
+        padding: 0.6rem;
+        /* Adjust input padding */
+        font-size: 0.85rem;
+        /* Adjust font size */
+    }
+
+    .login-button {
+        padding: 0.7rem;
+        /* Adjust button padding */
+        font-size: 0.9rem;
+        /* Adjust font size */
+    }
+}
+
+/* For very small screens (phones) */
+@media (max-width: 480px) {
+    .login-card {
+        padding: 1.5rem;
+        /* Further reduce padding */
+    }
+
+    .brand-title {
+        font-size: 1.5rem;
+        /* Adjust title size */
+    }
+
+    .tagline {
+        font-size: 0.85rem;
+        /* Adjust tagline size */
+    }
+
+    .input-group input {
+        padding: 0.5rem;
+        /* Reduce input padding */
+    }
+
+    .login-button {
+        padding: 0.6rem;
+        /* Adjust button padding */
+        font-size: 0.85rem;
+        /* Adjust button size */
+    }
+}
